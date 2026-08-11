@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}發生問題｜Git 實作測驗{% endblock %}
+{% block content %}
+<section class="error-card">
+  <span class="error-code">!</span>
+  <p class="eyebrow">UNABLE TO CONTINUE</p>
+  <h1>目前無法處理這個要求</h1>
+  <p>{{ message }}</p>
+  <a class="button button-primary" href="{{ url_for('main.home') }}">返回首頁</a>
+</section>
+{% endblock %}

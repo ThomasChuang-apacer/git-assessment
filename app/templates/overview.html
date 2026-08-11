@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}任務總覽｜Git 實作測驗{% endblock %}
+{% block header_action %}<span class="candidate-chip">{{ result.candidate_name }}</span>{% endblock %}
+{% block content %}
+<section class="overview-header">
+  <div>
+    <p class="eyebrow">ASSESSMENT OVERVIEW</p>
+    <h1>任務總覽</h1>
+    <p>每題可獨立完成。進入任務、在指定資料夾操作，然後回來檢查結果。</p>
+    <button class="button repository-guide-button" type="button" id="open-repository-guide">
+      <span aria-hidden="true">?</span> 如何開始
+    </button>
+  </div>
+  <div class="progress-panel">
+    <div class="progress-number"><strong>{{ completed }}</strong><span>/ {{ questions|length }}</span></div>
+    <div>
+      <p>{{ '全部完成' if completed == questions|length else '已完成任務' }}</p>
+      <div class="progress-track" role="progressbar" aria-label="測驗完成進度" aria-valuemin="0" aria-valuemax="{{ questions|length }}" aria-valuenow="{{ completed }}"><span style="width: {{ completed / questions|length * 100 }}%"></span></div>
+    </div>
+  </div>
+</section>
+
+{% include "_repository_guide.html" %}
+
+{% set broken = task_health.values() | rejectattr('healthy') | list %}
+{% if broken %}
+<section class="constraint-block" aria-labelledby="repair-title">
+  <div class="constraint-title" id="repair-title">需要修復的題目</div>
+  <p>系統會先將損壞資料備份到 quarantine，再重建該題。修復後該題會回到尚未開始。</p>
+  {% for question in questions %}
+    {% if not task_health[question.id].healthy %}
+    <p>
+      <strong>Task 0{{ question.order }}：</strong>{{ task_health[question.id].message }}
+      <button class="button button-secondary" type="button"
+              data-repair-task="{{ question.id }}"
+              data-repair-session="{{ result.session_id }}"
+              data-repair-completed="{{ 'yes' if states[question.id].status == 'completed' else 'no' }}">備份並修復</button>
+    </p>
+    {% endif %}
+  {% endfor %}
+</section>
+{% endif %}
+
+{% if completed == questions|length %}
+<div class="completion-banner">
+  <span class="completion-icon" aria-hidden="true">✓</span>
+  <div><strong>所有任務都完成了</strong><p>結果已保存，可以點擊下方「查看／保存結果」下載結果圖片。</p></div>
+</div>
+{% endif %}
+
+<section class="task-grid" aria-label="考試任務">
+  {% for question in questions %}
+  {% set state = states[question.id] %}
+  <a class="task-card status-{{ state.status }}" href="{{ url_for('main.task', session_id=result.session_id, task_id=question.id) }}">
+    <div class="task-card-top">
+      <span class="task-number">0{{ question.order }}</span>
+      <span class="state-label">
+        {% if state.status == 'completed' %}✓ 已完成{% elif state.status == 'in_progress' %}進行中{% else %}尚未開始{% endif %}
+      </span>
+    </div>
+    <h2>{{ question.title }}</h2>
+    <p>{{ question.description }}</p>
+    <div class="task-card-footer">
+      <span>{{ question.checks|length }} 項完成條件</span>
+      <span class="card-arrow" aria-hidden="true">→</span>
+    </div>
+  </a>
+  {% endfor %}
+</section>
+
+<footer class="session-footer">
+  <span>開始時間：{{ result.started_at }}</span>
+  <span class="result-links">
+    <a href="{{ url_for('main.result_summary', session_id=result.session_id) }}">查看／保存結果</a>
+    <a href="{{ url_for('main.get_result', session_id=result.session_id) }}" target="_blank" rel="noreferrer">原始 JSON</a>
+  </span>
+</footer>
+{% endblock %}

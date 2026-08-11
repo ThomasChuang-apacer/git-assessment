@@ -1,0 +1,45 @@
+# Local tools and editors
+.agents/
+.claude/
+.codex/
+.idea/
+.vscode/
+
+# Python environments and caches
+.venv/
+env/
+venv/
+__pycache__/
+.hypothesis/
+.mypy_cache/
+.nox/
+.pytest_cache/
+.ruff_cache/
+.tox/
+*.py[cod]
+.coverage
+htmlcov/
+
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+*.pfx
+.netrc
+.pypirc
+credentials.*
+id_ed25519*
+id_rsa*
+secrets.*
+
+# Generated application data
+data/templates/
+data/.templates-*/
+runtime/
+
+# OS files
+.DS_Store
+Thumbs.db

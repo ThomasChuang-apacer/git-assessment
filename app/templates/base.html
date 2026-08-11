@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <meta name="git-assessment-token" content="{{ api_token }}">
+  <title>{% block title %}Git 實作測驗{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body>
+  <a class="skip-link" href="#main-content">跳至主要內容</a>
+  <header class="site-header">
+    <a class="brand" href="{{ url_for('main.home') }}" aria-label="Git 實作測驗首頁">
+      <span class="brand-mark" aria-hidden="true">G</span>
+      <span>Git 實作測驗</span>
+    </a>
+    <div class="header-actions">
+      {% block header_action %}{% endblock %}
+      <button class="shutdown-button" type="button" id="shutdown-app" aria-label="安全關閉 Git Assessment">
+        <span class="shutdown-dot" aria-hidden="true"></span>
+        <span class="shutdown-label-full">安全關閉 Git Assessment</span>
+        <span class="shutdown-label-short" aria-hidden="true">安全關閉</span>
+      </button>
+    </div>
+  </header>
+  <main class="page-shell" id="main-content" tabindex="-1">
+    {% block content %}{% endblock %}
+  </main>
+  <section class="shutdown-screen" id="shutdown-screen" hidden aria-live="polite">
+    <div class="shutdown-card">
+      <span class="shutdown-check" aria-hidden="true">✓</span>
+      <p class="eyebrow">SAFE SHUTDOWN</p>
+      <h1>關閉 Git Assessment</h1>
+      <p>測驗進度已保存，現在可以關閉此頁。</p>
+    </div>
+  </section>
+  <script src="{{ url_for('static', filename='app.js') }}" defer></script>
+</body>
+</html>

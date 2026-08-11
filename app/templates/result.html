@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}測驗結果｜Git 實作測驗{% endblock %}
+{% block header_action %}
+<a class="header-link" href="{{ url_for('main.overview', session_id=result.session_id) }}">返回任務總覽</a>
+{% endblock %}
+{% block content %}
+<section class="result-page">
+  <div class="result-heading">
+    <div>
+      <p class="eyebrow">ASSESSMENT RESULT</p>
+      <h1>測驗結果摘要</h1>
+    </div>
+    <button class="button button-primary" type="button" id="download-result-png">保存成 PNG</button>
+  </div>
+
+  <div class="result-card" id="result-summary-card">
+    <div class="result-person">
+      <span class="history-avatar">{{ summary.candidate_name[:1]|upper }}</span>
+      <div>
+        <span>姓名</span>
+        <h2>{{ summary.candidate_name }}</h2>
+        <small>開始時間：{{ summary.started_at }}</small>
+        {% if summary.completed_at %}<small>完成時間：{{ summary.completed_at }}</small>{% endif %}
+      </div>
+      <div class="result-score">
+        <strong>{{ summary.completed_count }}/{{ summary.total }}</strong>
+        <span>完成題數</span>
+      </div>
+    </div>
+
+    <div class="result-task-list">
+      {% for task in summary.tasks %}
+      <div class="result-task status-{{ task.status }}">
+        <span class="result-task-number">0{{ task.order }}</span>
+        <div><strong>{{ task.title }}</strong><small>檢查次數：{{ task.check_attempts }}</small></div>
+        <span class="result-status">
+          {% if task.status == 'completed' %}✓ 已完成{% elif task.status == 'in_progress' %}進行中{% else %}尚未完成{% endif %}
+        </span>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  <p id="result-download-message" class="action-message" role="status"></p>
+  <script id="result-summary-data" type="application/json">{{ summary|tojson }}</script>
+</section>
+{% endblock %}

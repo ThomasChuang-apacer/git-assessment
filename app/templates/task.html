@@ -1,0 +1,133 @@
+{% extends "base.html" %}
+{% block title %}任務 {{ question.order }}｜{{ question.title }}{% endblock %}
+{% block header_action %}
+<a class="header-link" href="{{ url_for('main.overview', session_id=result.session_id) }}">返回任務總覽</a>
+{% endblock %}
+{% block content %}
+<div class="task-layout" data-session-id="{{ result.session_id }}" data-task-id="{{ question.id }}">
+  <article class="task-main">
+    <div class="task-heading-row">
+      <div>
+        <p class="eyebrow">TASK 0{{ question.order }}</p>
+        <div class="task-title-line">
+          <h1>{{ question.title }}</h1>
+          <button class="button repository-guide-button task-guide-button" type="button" id="open-repository-guide">
+            <span aria-hidden="true">?</span> 如何開始
+          </button>
+        </div>
+      </div>
+      <div class="mini-progress" role="status" aria-live="polite"><strong id="completed-count">{{ completed }}</strong> / {{ total }} 完成</div>
+    </div>
+
+    <p class="task-description">{{ question.description }}</p>
+
+    {% include "_repository_guide.html" %}
+
+    {% if not task_compatibility.compatible %}
+    <section class="constraint-block">
+      <div class="constraint-title">需要套用新版題目</div>
+      <p>{{ task_compatibility.message }}</p>
+    </section>
+    {% endif %}
+
+    <section class="instruction-block">
+      <h2>任務要求</h2>
+      <ol>
+        {% for item in question.instructions %}<li>{{ item }}</li>{% endfor %}
+      </ol>
+    </section>
+
+    {% if question.remote_update_action %}
+    <section class="constraint-block">
+      <div class="constraint-title">模擬遠端操作</div>
+      {% if remote_update_status.available %}
+      <p>{{ question.remote_update_action.description }}</p>
+      <button class="button button-secondary" type="button" id="simulate-remote-update">
+        {% if remote_update_status.remote_updated %}遠端更新已建立{% else %}{{ question.remote_update_action.button_label }}{% endif %}
+      </button>
+      {% else %}
+      <p>{{ remote_update_status.message }}</p>
+      {% endif %}
+    </section>
+    {% endif %}
+
+    {% if question.copy_blocks %}
+    <section class="copy-blocks" aria-label="可複製的預期內容">
+      {% for block in question.copy_blocks %}
+      <div class="copy-code-card">
+        <div class="copy-code-header">
+          <div>
+            <span class="code-language">{{ block.language }}</span>
+            <h2>{{ block.title }}</h2>
+          </div>
+          <button class="button button-secondary" type="button" data-copy-target="task-code-{{ loop.index }}">複製程式碼</button>
+        </div>
+        <pre><code id="task-code-{{ loop.index }}">{{ block.content }}</code></pre>
+      </div>
+      {% endfor %}
+    </section>
+    {% endif %}
+
+    {% if question.constraints %}
+    <section class="constraint-block">
+      <div class="constraint-title">操作限制</div>
+      <ul>{% for item in question.constraints %}<li>{{ item }}</li>{% endfor %}</ul>
+    </section>
+    {% endif %}
+
+    <section class="repo-block">
+      <div>
+        <span class="repo-label">REPOSITORY</span>
+        <code id="repo-path">{{ repo }}</code>
+      </div>
+      <div class="repo-actions">
+        <button class="button button-secondary" type="button" data-copy-target="repo-path">複製路徑</button>
+        <button class="button button-secondary" type="button" id="open-folder">開啟資料夾</button>
+      </div>
+    </section>
+
+    <div class="task-navigation">
+      {% if previous %}
+      <a class="text-link" href="{{ url_for('main.task', session_id=result.session_id, task_id=previous.id) }}">← 上一題</a>
+      {% else %}<span></span>{% endif %}
+      {% if next_task %}
+      <a class="text-link" href="{{ url_for('main.task', session_id=result.session_id, task_id=next_task.id) }}">下一題 →</a>
+      {% else %}
+      <a class="text-link" href="{{ url_for('main.overview', session_id=result.session_id) }}">返回總覽 →</a>
+      {% endif %}
+    </div>
+  </article>
+
+  <aside class="check-panel" aria-labelledby="task-status-title">
+    <div class="check-panel-header">
+      <div>
+        <span class="card-kicker">完成條件</span>
+        <h2 id="task-status-title">{% if state.status == 'completed' %}任務已完成{% else %}準備好就檢查{% endif %}</h2>
+      </div>
+      <span id="task-checkmark" class="big-check {{ 'is-complete' if state.status == 'completed' else '' }}" aria-hidden="true">✓</span>
+    </div>
+
+    <div id="check-list" class="check-list" aria-live="polite">
+      {% if state.last_checks %}
+        {% for check in state.last_checks %}
+        <div class="check-item {{ 'passed' if check.passed else 'failed' }}">
+          <span class="check-symbol">{{ '✓' if check.passed else '✗' }}</span>
+          <div><strong>{{ check.label }}</strong><small>{{ check.message }}</small></div>
+        </div>
+        {% endfor %}
+      {% else %}
+        {% for check in question.checks %}
+        <div class="check-item pending">
+          <span class="check-symbol">·</span>
+          <div><strong>{{ check.label }}</strong><small>尚未檢查</small></div>
+        </div>
+        {% endfor %}
+      {% endif %}
+    </div>
+
+    <button class="button button-primary button-wide" type="button" id="check-task">檢查結果</button>
+    <button class="button button-quiet button-wide" type="button" id="reset-task">重設本題</button>
+    <p id="action-message" class="action-message" role="status"></p>
+  </aside>
+</div>
+{% endblock %}

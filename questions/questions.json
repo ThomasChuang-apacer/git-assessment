@@ -1,0 +1,160 @@
+{
+  "version": 1,
+  "questions": [
+    {
+      "id": "task01",
+      "order": 1,
+      "title": "提交指定的修改（只包含 src/config.py）",
+      "description": "這個 repository 目前同時有三種變更：需要提交的 src/config.py、尚未完成的 README.md，以及未追蹤的 debug.log。你的目標是只提交 src/config.py，其他兩個檔案都必須留在 working tree，不可進入 commit。",
+      "instructions": [
+        "先查看目前檔案狀態，分辨 src/config.py、README.md 與 debug.log 各自的狀態",
+        "只將 src/config.py 加入 staging area；不要加入 README.md 或 debug.log",
+        "建立一筆 commit，Commit message 必須完全等於：Fix configuration loading",
+        "提交後再次查看狀態：README.md 應仍是未提交修改，debug.log 應仍是未追蹤檔案"
+      ],
+      "constraints": ["不可刪除、還原或提交 README.md 與 debug.log；本題只能新增一筆 commit"],
+      "repository_template": "task01",
+      "checks": [
+        {"id": "message", "type": "commit_message", "expected": "Fix configuration loading", "label": "Commit message 正確"},
+        {"id": "config-in-commit", "type": "file_in_commit", "file": "src/config.py", "label": "src/config.py 已加入 commit"},
+        {"id": "readme-modified", "type": "working_tree_modified", "file": "README.md", "label": "README.md 保留為未提交修改"},
+        {"id": "debug-untracked", "type": "untracked_file", "file": "debug.log", "label": "debug.log 仍為未追蹤檔案"},
+        {"id": "debug-not-commit", "type": "file_not_in_commit", "file": "debug.log", "label": "debug.log 未加入 commit"},
+        {"id": "single-commit", "type": "commit_count", "range": "assessment-start..HEAD", "expected": 1, "label": "只建立一筆 commit"}
+      ]
+    },
+    {
+      "id": "task02",
+      "order": 2,
+      "title": "將遺漏的測試補進最新 Commit",
+      "description": "目前最新的一筆 commit 已包含程式修改，但漏掉了 tests/test_config.py。請先把測試檔改成題目提供的內容，再更新原本的最新 commit；完成後仍然只能有原來那一筆 commit。",
+      "instructions": [
+        "將 tests/test_config.py 完整修改為下方提供的內容，讓測試確認 production config path",
+        "把 tests/test_config.py 加入 staging area",
+        "使用 amend 更新目前最新的 commit，不要另外建立第二筆 commit",
+        "保留原本的 Commit message：Fix configuration loading",
+        "完成後確認 working tree 乾淨，而且從 assessment-start 到 HEAD 仍只有一筆 commit"
+      ],
+      "copy_blocks": [
+        {
+          "title": "請將 tests/test_config.py 修改為以下內容",
+          "language": "python",
+          "content": "from src.config import CONFIG_PATH\n\n\ndef test_config_path():\n    assert CONFIG_PATH == \"config/production.json\""
+        }
+      ],
+      "constraints": ["不可另外建立新 commit，也不可更改指定的 Commit message"],
+      "repository_template": "task02",
+      "checks": [
+        {"id": "message", "type": "commit_message", "expected": "Fix configuration loading", "label": "Commit message 保持不變"},
+        {"id": "config-in-commit", "type": "file_in_commit", "file": "src/config.py", "label": "最新 commit 包含 src/config.py"},
+        {"id": "test-in-commit", "type": "file_in_commit", "file": "tests/test_config.py", "label": "最新 commit 包含測試檔案"},
+        {"id": "test-content", "type": "file_at_revision_contains", "revision": "HEAD", "file": "tests/test_config.py", "expected": "CONFIG_PATH == \"config/production.json\"", "label": "測試內容已包含在 commit"},
+        {"id": "single-commit", "type": "commit_count", "range": "assessment-start..HEAD", "expected": 1, "label": "沒有增加額外 commit"},
+        {"id": "clean", "type": "working_tree_clean", "label": "Working tree 乾淨"}
+      ]
+    },
+    {
+      "id": "task03",
+      "order": 3,
+      "title": "從 main 建立功能分支並提交",
+      "description": "目前位於 main。請從 main 建立並切換到 feature/login-timeout，在新分支修改登入逾時設定並提交。完成後必須留在功能分支，而 main 仍維持原本內容。",
+      "instructions": [
+        "確認目前位於 main，再建立並切換到新分支 feature/login-timeout",
+        "在 feature/login-timeout 上，將 src/login.py 的 LOGIN_TIMEOUT 從 30 改為 60",
+        "只提交這次修改，Commit message 必須完全等於：Update login timeout",
+        "提交後確認仍位於 feature/login-timeout，且 working tree 乾淨"
+      ],
+      "constraints": ["不可直接在 main 提交；main 不可包含 LOGIN_TIMEOUT = 60 的修改"],
+      "repository_template": "task03",
+      "checks": [
+        {"id": "branch", "type": "current_branch", "expected": "feature/login-timeout", "label": "目前位於指定工作分支"},
+        {"id": "timeout", "type": "file_at_revision_contains", "revision": "HEAD", "file": "src/login.py", "expected": "LOGIN_TIMEOUT = 60", "label": "Timeout 修改已包含在 commit"},
+        {"id": "message", "type": "commit_message", "expected": "Update login timeout", "label": "Commit message 正確"},
+        {"id": "main-unchanged", "type": "file_at_revision_not_contains", "revision": "main", "file": "src/login.py", "expected": "LOGIN_TIMEOUT = 60", "label": "main 未包含功能修改"},
+        {"id": "single-commit", "type": "commit_count", "range": "main..HEAD", "expected": 1, "label": "工作分支只有本題 commit"},
+        {"id": "clean", "type": "working_tree_clean", "label": "Working tree 乾淨"}
+      ]
+    },
+    {
+      "id": "task04",
+      "order": 4,
+      "title": "Fetch 遠端更新並用 Rebase 解決 Conflict",
+      "description": "你目前在 feature/login-timeout，分支上已有自己的修改。另一位開發者會更新遠端 main，而且雙方都修改了 src/login.py。請先用題目按鈕建立遠端更新，再回到 Terminal 執行 fetch，最後把目前分支 rebase 到最新的 origin/main，並手動整合雙方需要保留的設定。",
+      "instructions": [
+        "確認目前位於 feature/login-timeout，而且 working tree 沒有尚未提交的修改",
+        "在題目頁按下「模擬遠端 main 更新」，讓新 commit 只出現在模擬的遠端 main",
+        "回到 Terminal 執行 fetch，更新本機的 origin/main；按按鈕後不能省略這一步",
+        "查看分支紀錄，確認 origin/main 已出現新的遠端 commit",
+        "將 feature/login-timeout rebase 到最新的 origin/main",
+        "處理 src/login.py 的 conflict：保留 LOGIN_TIMEOUT = 60，同時保留遠端新增的 LOGIN_RETRY = 5",
+        "完成 rebase 後確認仍位於 feature/login-timeout、working tree 乾淨，且沒有未完成的 rebase"
+      ],
+      "remote_update_action": {
+        "button_label": "模擬遠端 main 更新",
+        "description": "這個按鈕只會在模擬的遠端 main 建立新 commit，不會自動更新目前 repository 的 origin/main，也不會修改你的工作分支。按下後請回到 Terminal 執行 fetch，再進行 rebase。"
+      },
+      "constraints": ["必須使用 rebase 完成整合，不可用 merge 或 merge commit 取代；不可省略 fetch"],
+      "repository_template": "task04",
+      "checks": [
+        {"id": "branch", "type": "current_branch", "expected": "feature/login-timeout", "label": "目前位於工作分支"},
+        {"id": "main-ancestor", "type": "is_ancestor", "ancestor": "origin/main", "descendant": "HEAD", "label": "工作分支已基於最新 origin/main"},
+        {"id": "timeout", "type": "file_contains", "file": "src/login.py", "expected": "LOGIN_TIMEOUT = 60", "label": "Timeout 保留為 60"},
+        {"id": "retry", "type": "file_contains", "file": "src/login.py", "expected": "LOGIN_RETRY = 5", "label": "已保留 main 的最新 retry 設定"},
+        {"id": "no-merge", "type": "no_merge_commit", "range": "origin/main..HEAD", "label": "沒有使用 merge commit"},
+        {"id": "clean", "type": "working_tree_clean", "label": "Working tree 乾淨"},
+        {"id": "operation", "type": "no_operation_in_progress", "label": "Rebase 已完整結束"}
+      ]
+    },
+    {
+      "id": "task05",
+      "order": 5,
+      "title": "用 Stash 暫存修改並查看遠端分支",
+      "description": "你目前在 feature/login-timeout，notes/development.md 有一份不能提交但必須保留的草稿。遠端 origin 另有 hotfix/check-status，本機還看不到對應分支。請先用 stash 暫時收起草稿，再取得並切換到 Hotfix 分支查看修正，最後回到原分支恢復草稿。",
+      "instructions": [
+        "先查看狀態，確認 notes/development.md 是未提交修改",
+        "不要建立 commit；使用 stash 暫時保存目前修改，讓 working tree 可以安全切換分支",
+        "執行 fetch，取得 origin 最新的遠端分支資訊",
+        "從 origin/hotfix/check-status 建立本機追蹤分支 hotfix/check-status，並切換到該分支；可使用 switch 或 checkout",
+        "確認 hotfix/check-status 的 src/status.py 已包含 STATUS = \"healthy\"；不需要修改或提交任何檔案",
+        "切回原本的 feature/login-timeout",
+        "使用 stash pop 恢復原本對 notes/development.md 的修改",
+        "最後確認 notes/development.md 再次顯示為未提交修改，而且 git stash list 完全沒有輸出"
+      ],
+      "constraints": ["不可把草稿建立成 commit；完成後必須回到 feature/login-timeout、恢復草稿，且不可留下任何 stash 紀錄"],
+      "repository_template": "task05",
+      "checks": [
+        {"id": "branch", "type": "current_branch", "expected": "feature/login-timeout", "label": "已回到原本工作分支"},
+        {"id": "notes-modified", "type": "working_tree_modified", "file": "notes/development.md", "label": "未完成修改已恢復"},
+        {"id": "notes-content", "type": "file_contains", "file": "notes/development.md", "expected": "DRAFT: investigate login timeout behavior.", "label": "草稿內容完整保留"},
+        {"id": "hotfix-branch", "type": "branch_exists", "expected": "hotfix/check-status", "label": "已建立本機 Hotfix 追蹤分支"},
+        {"id": "hotfix-updated", "type": "file_at_revision_contains", "revision": "hotfix/check-status", "file": "src/status.py", "expected": "STATUS = \"healthy\"", "label": "Hotfix 分支包含遠端最新修正"},
+        {"id": "stash-empty", "type": "stash_count", "expected": 0, "label": "git stash list 沒有任何紀錄"},
+        {"id": "switched-back", "type": "reflog_contains", "expected": "moving from hotfix/check-status to feature/login-timeout", "label": "已完成指定的來回分支切換"}
+      ]
+    },
+    {
+      "id": "task06",
+      "order": 6,
+      "title": "Cherry-pick 指定的修正 Commit",
+      "description": "你目前位於 feature/login-timeout。另一個本機分支 fix/validation 的最新 commit 包含空字串驗證修正。請找出這筆 commit，並用 cherry-pick 只把它套用到目前分支；不要合併整個 fix/validation。",
+      "instructions": [
+        "確認目前位於 feature/login-timeout",
+        "查看 fix/validation 最新的一筆 commit，確認其 SHA 與訊息",
+        "使用 cherry-pick 將這一筆 commit 套用到 feature/login-timeout，不要執行 merge",
+        "完成後確認 src/validator.py 已包含空字串驗證修正，最新 Commit message 為 Reject empty validation values",
+        "確認 working tree 乾淨，而且沒有未完成的 cherry-pick"
+      ],
+      "constraints": ["只能 cherry-pick 指定的一筆 commit，不可 merge、rebase 或直接合併整個 fix/validation 分支"],
+      "repository_template": "task06",
+      "checks": [
+        {"id": "branch", "type": "current_branch", "expected": "feature/login-timeout", "label": "目前位於工作分支"},
+        {"id": "content", "type": "file_contains", "file": "src/validator.py", "expected": "value.strip() != \"\"", "label": "驗證修正已套用"},
+        {"id": "message", "type": "commit_message", "expected": "Reject empty validation values", "label": "對應 commit 已建立"},
+        {"id": "single-commit", "type": "commit_count", "range": "assessment-start..HEAD", "expected": 1, "label": "只增加指定的一筆 commit"},
+        {"id": "not-merged", "type": "not_is_ancestor", "ancestor": "fix/validation", "descendant": "HEAD", "label": "未合併整個來源分支"},
+        {"id": "clean", "type": "working_tree_clean", "label": "Working tree 乾淨"},
+        {"id": "operation", "type": "no_operation_in_progress", "label": "沒有未完成的套用操作"}
+      ]
+    }
+  ]
+}

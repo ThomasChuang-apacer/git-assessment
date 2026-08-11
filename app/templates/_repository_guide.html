@@ -1,0 +1,44 @@
+<dialog class="guide-dialog" id="repository-guide" aria-labelledby="repository-guide-title">
+  <div class="guide-panel">
+    <header class="guide-header">
+      <div>
+        <p class="eyebrow">REPOSITORY GUIDE</p>
+        <h2 id="repository-guide-title">如何開始操作題目？</h2>
+      </div>
+      <button class="guide-close" type="button" data-guide-close aria-label="關閉如何開始">×</button>
+    </header>
+    <p class="guide-intro">進入任一題後，可以用下列任一種方式開啟該題的 Repository。Git 指令必須在這個資料夾中執行。</p>
+
+    <div class="guide-methods">
+      <section class="guide-method">
+        <span class="guide-number" aria-hidden="true">1</span>
+        <div>
+          <h3>複製地址，再使用 <code>cd</code></h3>
+          <p>在題目頁按「複製地址」，開啟 CMD 或 PowerShell，輸入下列指令並貼上剛才複製的地址：</p>
+          <code class="guide-command">cd "貼上剛才複製的地址"</code>
+        </div>
+      </section>
+
+      <section class="guide-method">
+        <span class="guide-number" aria-hidden="true">2</span>
+        <div>
+          <h3>開啟資料夾，再從網址列開啟 CMD</h3>
+          <p>在題目頁按「開啟資料夾」，點擊檔案總管上方的網址列，輸入 <code>cmd</code> 後按 Enter，即可直接在該資料夾開啟 CMD。</p>
+        </div>
+      </section>
+
+      <section class="guide-method">
+        <span class="guide-number" aria-hidden="true">3</span>
+        <div>
+          <h3>使用 VS Code 操作</h3>
+          <p>在 VS Code 選擇「檔案 → 開啟資料夾」，貼上題目頁顯示的地址並開啟。若已安裝 <code>code</code> 指令，也可在該資料夾的 CMD 輸入 <code>code .</code>。</p>
+        </div>
+      </section>
+    </div>
+
+    <footer class="guide-footer">
+      <span>完成 Git 操作後，回到題目頁按「檢查結果」。</span>
+      <button class="button button-primary" type="button" data-guide-close>我知道了</button>
+    </footer>
+  </div>
+</dialog>

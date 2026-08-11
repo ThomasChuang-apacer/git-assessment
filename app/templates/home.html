@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+{% block title %}開始測驗｜Git 實作測驗{% endblock %}
+{% block content %}
+<section class="hero-grid">
+  <div class="hero-copy">
+    <p class="eyebrow">LOCAL PRACTICAL ASSESSMENT</p>
+    <h1>動手實作，<br>確認 Git 基本功。</h1>
+    <p class="hero-lead">六個獨立任務，涵蓋日常最常用的提交、分支、rebase、conflict、stash 與 cherry-pick。</p>
+    <div class="feature-row" aria-label="測驗特色">
+      
+     
+      
+    </div>
+  </div>
+
+  <div class="start-card">
+    <div class="card-kicker">準備開始</div>
+    <h2>建立你的考試環境</h2>
+    <p>系統會為每個任務建立獨立資料夾。請在外部 Terminal 或 VS Code 完成操作。</p>
+
+    <div class="environment" aria-label="環境狀態">
+      <div class="environment-item {{ 'is-ready' if environment.git_ok else 'is-error' }}">
+        <span class="status-dot"></span>
+        <div><strong>Git</strong><small>{{ environment.git_message }}</small></div>
+      </div>
+      <div class="environment-item {{ 'is-ready' if environment.templates_ok else 'is-error' }}">
+        <span class="status-dot"></span>
+        <div><strong>題目環境</strong><small>{{ environment.template_message }}</small></div>
+      </div>
+      <div class="environment-item {{ 'is-ready' if environment.runtime_issue_count == 0 else 'is-error' }}">
+        <span class="status-dot"></span>
+        <div><strong>儲存狀態</strong><small>{{ '所有測驗紀錄正常' if environment.runtime_issue_count == 0 else environment.runtime_issue_count ~ ' 個項目需要檢查' }}</small></div>
+      </div>
+    </div>
+
+    {% if latest_incomplete %}
+    <a class="resume-callout" href="{{ url_for('main.overview', session_id=latest_incomplete.session_id) }}">
+      <span class="resume-icon" aria-hidden="true">↗</span>
+      <span class="resume-copy">
+        <strong>繼續上次測驗</strong>
+        <small>{{ latest_incomplete.candidate_name }} · 已完成 {{ latest_incomplete.completed_count }}/{{ latest_incomplete.total }}</small>
+      </span>
+      <span class="resume-arrow" aria-hidden="true">→</span>
+    </a>
+    <div class="or-divider"><span>或建立新測驗</span></div>
+    {% endif %}
+
+    <form action="{{ url_for('main.create_session') }}" method="post" class="start-form">
+      <input type="hidden" name="_api_token" value="{{ api_token }}">
+      <input type="hidden" name="_confirm" value="create">
+      <label for="candidate_name">姓名或識別代碼 <span class="required-mark" aria-hidden="true">*</span><span class="visually-hidden">（必填）</span></label>
+      <p class="field-hint" id="candidate-name-hint">最多 80 個字元；按 Enter 也可建立測驗。</p>
+      <input id="candidate_name" name="candidate_name" maxlength="80" autocomplete="name" placeholder="例如：Woly Wu" aria-describedby="candidate-name-hint" required>
+      <button class="button button-primary button-wide" type="submit" {% if not environment.ready %}disabled{% endif %}>
+        建立新測驗 <span aria-hidden="true">→</span>
+      </button>
+    </form>
+    <a class="history-jump" href="#history-title">查看這台電腦上的歷史紀錄</a>
+  </div>
+</section>
+
+<section class="history-section" aria-labelledby="history-title">
+  <div class="history-heading">
+    <div>
+      <p class="eyebrow">SAVED LOCALLY</p>
+      <h2 id="history-title">最近的測驗</h2>
+    </div>
+    <p>進度會保存在這台電腦，可從中斷處繼續。</p>
+  </div>
+  {% if recent_sessions %}
+  <div class="history-list" role="list">
+    {% for session in recent_sessions %}
+    <div class="history-row {{ 'is-unavailable' if not session.available else '' }}" role="listitem">
+      <div class="history-person">
+        <span class="history-avatar">{{ session.candidate_name[:1]|upper }}</span>
+        <div><strong>{{ session.candidate_name }}</strong><small>{{ session.started_at }}</small></div>
+      </div>
+      <div class="history-progress">
+        <strong>{{ session.completed_count }}/{{ session.total }}</strong>
+        <span>{{ (session.completed_count / session.total * 100)|round|int }}% · {{ '已完成' if session.completed_at else '尚未完成' }}</span>
+      </div>
+      <div class="history-actions">
+        {% if session.available %}
+        <a class="button button-secondary" href="{{ url_for('main.overview', session_id=session.session_id) }}">
+          {{ '查看結果' if session.completed_at else '繼續測驗' }}
+        </a>
+        {% else %}
+        <span class="unavailable-label">Workspace 無法使用</span>
+        {% endif %}
+        <button
+          class="button button-danger"
+          type="button"
+          data-delete-session="{{ session.session_id }}"
+          data-delete-candidate="{{ session.candidate_name }}"
+          data-delete-started="{{ session.started_at }}"
+        >刪除</button>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="empty-state" role="status">
+    <strong>尚無測驗紀錄</strong>
+    <p>建立第一份測驗後，進度與結果會顯示在這裡。</p>
+  </div>
+  {% endif %}
+</section>
+{% endblock %}
