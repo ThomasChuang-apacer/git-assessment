@@ -8,13 +8,13 @@ if not exist ".venv\Scripts\python.exe" (
   echo Preparing Git Assessment for first use...
   python -m venv .venv || goto :error
   if defined GIT_ASSESSMENT_PROGRESS >"runtime\setup-status.txt" echo install-packages
-  ".venv\Scripts\python.exe" -m pip install -r requirements.txt || goto :error
+  ".venv\Scripts\python.exe" -m pip install -r requirements\requirements.txt || goto :error
 )
 
 if not exist ".venv\Lib\site-packages\flask\__init__.py" (
   if defined GIT_ASSESSMENT_PROGRESS >"runtime\setup-status.txt" echo install-packages
   echo Repairing Python packages...
-  ".venv\Scripts\python.exe" -m pip install -r requirements.txt || goto :error
+  ".venv\Scripts\python.exe" -m pip install -r requirements\requirements.txt || goto :error
 )
 
 if defined GIT_ASSESSMENT_PROGRESS >"runtime\setup-status.txt" echo start-server
