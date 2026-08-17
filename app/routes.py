@@ -22,18 +22,24 @@ def session_context(session_id: str) -> tuple[dict, dict[str, dict]]:
     return result, states
 
 
+def wants_json_response() -> bool:
+    return request.path.startswith("/api/") and request.accept_mimetypes.best_match(
+        ["application/json", "text/html"]
+    ) != "text/html"
+
+
 @bp.errorhandler(KeyError)
 @bp.errorhandler(ValueError)
 def handle_known_error(error):
     message = error.args[0] if error.args else "要求無法處理"
-    if request.path.startswith("/api/"):
+    if wants_json_response():
         return jsonify({"error": message}), 400
     return render_template("error.html", message=message), 400
 
 
 @bp.app_errorhandler(HTTPException)
 def handle_http_error(error: HTTPException):
-    if request.path.startswith("/api/"):
+    if wants_json_response():
         return jsonify({"error": error.description}), error.code
     return render_template("error.html", message=error.description), error.code
 

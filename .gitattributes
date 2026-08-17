@@ -7,8 +7,7 @@
 .github/ export-ignore
 .gitattributes export-ignore
 .gitignore export-ignore
-UIUX.md export-ignore
 pytest.ini export-ignore
-requirements-dev.txt export-ignore
-spec.md export-ignore
+requirements/requirements-dev.txt export-ignore
+spec/** export-ignore
 tests/ export-ignore

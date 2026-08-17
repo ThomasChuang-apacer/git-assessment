@@ -256,6 +256,26 @@ def test_post_requires_local_token(assessment):
     assert service.task_state(refreshed, "task01")["check_attempts"] == 1
 
 
+def test_session_form_error_uses_requested_response_format(assessment):
+    app, _, _ = assessment
+    client = app.test_client()
+    data = {
+        "_api_token": app.config["LOCAL_API_TOKEN"],
+        "_confirm": "create",
+        "candidate_name": "",
+    }
+
+    html = client.post("/api/sessions", data=data, headers={"Accept": "text/html"})
+    assert html.status_code == 400
+    assert html.mimetype == "text/html"
+
+    json_response = client.post(
+        "/api/sessions", data=data, headers={"Accept": "application/json"}
+    )
+    assert json_response.status_code == 400
+    assert json_response.is_json
+
+
 def test_shutdown_requires_token_and_calls_registered_server(assessment):
     app, _, _ = assessment
     stopped = threading.Event()
