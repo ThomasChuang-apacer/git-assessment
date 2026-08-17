@@ -22,6 +22,15 @@
 
 測驗進度保存在 `runtime/`，關閉後可以繼續作答。
 
+## 輔助腳本說明
+
+`scripts/` 目錄包含以下內部與輔助腳本：
+
+- `start.bat`：終端機啟動腳本，需查看完整啟動輸出或排查錯誤時使用。
+- `Stop Git Assessment.bat`：停止背景伺服器處理程序。網頁無法操作時使用。
+- `First Start Git Assessment.ps1`：初次啟動時顯示 GUI 安裝進度（由 VBS 自動呼叫）。
+- `Show Git Assessment Error.ps1`：啟動失敗時顯示錯誤訊息彈窗（由 `start.bat` 自動呼叫）。
+
 ## 執行測試
 
 ```powershell

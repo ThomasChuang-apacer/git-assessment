@@ -425,6 +425,8 @@ Template 更新不會覆寫既有作答；考生需建立新測驗或重設該�
 | `app/template_builder.py` | 建立六題初始 repositories |
 | `app/security.py` | 本機 Host、Origin 與 API token 防護 |
 | `questions/questions.json` | 題目文字、限制與 checks |
+| `Start Git Assessment.vbs` | 專案根目錄單一啟動入口 |
+| `scripts/` | 本機啟動、安裝進度與輔助維護腳本 |
 | `app/static/app.js` | 複製、檢查、重設與資料夾操作 |
 
 主要資料夾：
