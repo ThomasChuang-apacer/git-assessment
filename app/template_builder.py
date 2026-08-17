@@ -9,7 +9,7 @@ from pathlib import Path
 
 
 class TemplateBuilder:
-    VERSION = 6
+    VERSION = 7
     _validation_cache: dict[tuple[str, bool], tuple[int, tuple[bool, str]]] = {}
 
     def __init__(self, root: Path):
@@ -66,6 +66,8 @@ class TemplateBuilder:
                 repo = self.root / task_id / "repo"
                 if not (repo / ".git").is_dir():
                     return False, f"{task_id} 缺少 .git"
+                if self._git(repo, "config", "--bool", "core.longpaths") != "true":
+                    return False, f"{task_id} 未啟用 Windows 長路徑"
                 if not deep:
                     continue
                 if self._git(repo, "rev-parse", "--verify", "HEAD") == "":
@@ -96,7 +98,7 @@ class TemplateBuilder:
                 task05_repo, "show-ref", "--verify", "refs/remotes/origin/hotfix/check-status"
             )
             task05_version = self._git(task05_repo, "config", "--get", "assessment.templateVersion")
-            if not remote_hotfix or local_hotfix.returncode == 0 or tracked_hotfix.returncode == 0 or task05_version != "6":
+            if not remote_hotfix or local_hotfix.returncode == 0 or tracked_hotfix.returncode == 0 or task05_version != str(self.VERSION):
                 return False, "task05 假遠端分支不應在本機預先存在"
         except (OSError, ValueError, RuntimeError, json.JSONDecodeError) as exc:
             return False, str(exc)
@@ -128,6 +130,7 @@ class TemplateBuilder:
         repo = self.root / task_id / "repo"
         repo.mkdir(parents=True)
         self._git(repo, "init", "-b", "main")
+        self._git(repo, "config", "core.longpaths", "true")
         self._git(repo, "config", "user.name", "Git Assessment")
         self._git(repo, "config", "user.email", "git-assessment@example.invalid")
         return repo
@@ -178,9 +181,11 @@ class TemplateBuilder:
         repo.mkdir(parents=True)
         origin.mkdir(parents=True)
         self._git(repo, "init", "-b", "main")
+        self._git(repo, "config", "core.longpaths", "true")
         self._git(repo, "config", "user.name", "Git Assessment")
         self._git(repo, "config", "user.email", "git-assessment@example.invalid")
         subprocess.run(["git", "init", "--bare", str(origin)], check=True, capture_output=True)
+        self._git(origin, "config", "core.longpaths", "true")
         self._write(repo, "src/login.py", "LOGIN_TIMEOUT = 30\nLOGIN_RETRY = 3\n")
         self._commit_all(repo, "Initial login service")
         self._git(repo, "tag", "assessment-start")
@@ -203,6 +208,7 @@ class TemplateBuilder:
         origin = task_root / "origin.git"
         origin.mkdir(parents=True)
         subprocess.run(["git", "init", "--bare", str(origin)], check=True, capture_output=True)
+        self._git(origin, "config", "core.longpaths", "true")
         self._write(repo, "notes/development.md", "# Development Notes\n\nStable notes.\n")
         self._write(repo, "src/status.py", 'STATUS = "ok"\n')
         self._commit_all(repo, "Initial project")
@@ -216,7 +222,7 @@ class TemplateBuilder:
         self._git(repo, "switch", "-c", "feature/login-timeout", "assessment-start")
         self._git(repo, "branch", "-D", "hotfix/check-status")
         self._git(repo, "update-ref", "-d", "refs/remotes/origin/hotfix/check-status")
-        self._git(repo, "config", "assessment.templateVersion", "6")
+        self._git(repo, "config", "assessment.templateVersion", str(self.VERSION))
         self._write(
             repo,
             "notes/development.md",
