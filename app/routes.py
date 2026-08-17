@@ -25,7 +25,7 @@ def session_context(session_id: str) -> tuple[dict, dict[str, dict]]:
 def wants_json_response() -> bool:
     return request.path.startswith("/api/") and request.accept_mimetypes.best_match(
         ["application/json", "text/html"]
-    ) == "application/json"
+    ) != "text/html"
 
 
 @bp.errorhandler(KeyError)
