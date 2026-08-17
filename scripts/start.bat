@@ -1,6 +1,6 @@
 @echo off
 setlocal
-cd /d "%~dp0"
+cd /d "%~dp0.."
 set "GIT_ASSESSMENT_EXIT_CODE="
 
 if not exist ".venv\Scripts\python.exe" (
@@ -28,7 +28,7 @@ if not defined GIT_ASSESSMENT_EXIT_CODE set "GIT_ASSESSMENT_EXIT_CODE=%errorleve
 if "%GIT_ASSESSMENT_EXIT_CODE%"=="0" set "GIT_ASSESSMENT_EXIT_CODE=1"
 echo.
 echo Unable to start Git Assessment. Please confirm Python 3.11+ and Git are installed.
-echo Log: %~dp0runtime\logs\git-assessment.log
+echo Log: %CD%\runtime\logs\git-assessment.log
 if defined GIT_ASSESSMENT_PROGRESS (
   exit /b %GIT_ASSESSMENT_EXIT_CODE%
 ) else if defined GIT_ASSESSMENT_HIDDEN (

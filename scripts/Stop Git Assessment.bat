@@ -1,6 +1,6 @@
 @echo off
 setlocal
-cd /d "%~dp0"
+cd /d "%~dp0.."
 if not exist "runtime\git-assessment.pid" (
   echo Git Assessment is not running.
   pause

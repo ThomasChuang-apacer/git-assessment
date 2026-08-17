@@ -6,7 +6,7 @@ param(
     [int]$PopupSeconds = 15
 )
 
-$projectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+$projectRoot = Split-Path -Parent $PSScriptRoot
 $logPath = Join-Path $projectRoot "runtime\logs\git-assessment.log"
 $port = if ($env:GIT_ASSESSMENT_PORT) { $env:GIT_ASSESSMENT_PORT } else { "8765" }
 

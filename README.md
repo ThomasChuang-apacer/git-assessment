@@ -18,7 +18,7 @@
 4. 輸入姓名，依題目提供的路徑進入 repository 操作。
 5. 完成後回到瀏覽器按「檢查結果」。
 
-需要查看啟動錯誤時，改用 `start.bat`。停止程式請使用網頁右上角的「安全關閉」；網頁無法操作時可執行 `Stop Git Assessment.bat`。
+需要查看啟動錯誤時，改用 `scripts/start.bat`。停止程式請使用網頁右上角的「安全關閉」；網頁無法操作時可執行 `scripts/Stop Git Assessment.bat`。
 
 測驗進度保存在 `runtime/`，關閉後可以繼續作答。
 
@@ -58,6 +58,7 @@ app/                 Flask 程式與網頁
 questions/           題目與自動檢查規則
 data/templates/      自動產生的題目範本
 runtime/             本機測驗進度與紀錄
+scripts/             本機啟動與輔助腳本
 tests/               自動化測試
 ```
 
