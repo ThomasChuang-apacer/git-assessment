@@ -17,7 +17,7 @@ End If
 
 If Not fileSystem.FileExists(folder & "\.venv\Scripts\python.exe") Then
   progressCommand = "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File " & Chr(34) & folder & "\scripts\First Start Git Assessment.ps1" & Chr(34) & " -ProjectRoot " & Chr(34) & folder & Chr(34)
-  shell.Run progressCommand, 0, False
+  shell.Run progressCommand, 1, False
   WScript.Quit
 End If
 
