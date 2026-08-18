@@ -18,9 +18,18 @@
 4. 輸入姓名，依題目提供的路徑進入 repository 操作。
 5. 完成後回到瀏覽器按「檢查結果」。
 
-需要查看啟動錯誤時，改用 `start.bat`。停止程式請使用網頁右上角的「安全關閉」；網頁無法操作時可執行 `Stop Git Assessment.bat`。
+需要查看啟動錯誤時，改用 `scripts/start.bat`。停止程式請使用網頁右上角的「安全關閉」；網頁無法操作時可執行 `scripts/Stop Git Assessment.bat`。
 
 測驗進度保存在 `runtime/`，關閉後可以繼續作答。
+
+## 輔助腳本說明
+
+`scripts/` 目錄包含以下內部與輔助腳本：
+
+- `start.bat`：終端機啟動腳本，需查看完整啟動輸出或排查錯誤時使用。
+- `Stop Git Assessment.bat`：停止背景伺服器處理程序。網頁無法操作時使用。
+- `First Start Git Assessment.ps1`：初次啟動時顯示 GUI 安裝進度（由 VBS 自動呼叫）。
+- `Show Git Assessment Error.ps1`：啟動失敗時顯示錯誤訊息彈窗（由 `start.bat` 自動呼叫）。
 
 ## 執行測試
 
@@ -58,6 +67,7 @@ app/                 Flask 程式與網頁
 questions/           題目與自動檢查規則
 data/templates/      自動產生的題目範本
 runtime/             本機測驗進度與紀錄
+scripts/             本機啟動與輔助腳本
 tests/               自動化測試
 ```
 

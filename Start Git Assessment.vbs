@@ -16,12 +16,12 @@ If IsGitAssessmentRunning(url) Then
 End If
 
 If Not fileSystem.FileExists(folder & "\.venv\Scripts\python.exe") Then
-  progressCommand = "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File " & Chr(34) & folder & "\First Start Git Assessment.ps1" & Chr(34) & " -ProjectRoot " & Chr(34) & folder & Chr(34)
+  progressCommand = "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File " & Chr(34) & folder & "\scripts\First Start Git Assessment.ps1" & Chr(34) & " -ProjectRoot " & Chr(34) & folder & Chr(34)
   shell.Run progressCommand, 0, False
   WScript.Quit
 End If
 
-command = shell.ExpandEnvironmentStrings("%ComSpec%") & " /d /c " & Chr(34) & Chr(34) & folder & "\start.bat" & Chr(34) & Chr(34)
+command = shell.ExpandEnvironmentStrings("%ComSpec%") & " /d /c " & Chr(34) & Chr(34) & folder & "\scripts\start.bat" & Chr(34) & Chr(34)
 shell.Run command, 0, False
 
 Function IsGitAssessmentRunning(address)

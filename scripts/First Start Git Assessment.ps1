@@ -9,7 +9,7 @@ Add-Type -AssemblyName System.Drawing
 [System.Windows.Forms.Application]::EnableVisualStyles()
 
 $ProjectRoot = [System.IO.Path]::GetFullPath($ProjectRoot)
-$startBat = Join-Path $ProjectRoot "start.bat"
+$startBat = Join-Path $ProjectRoot "scripts\start.bat"
 $runtimeRoot = Join-Path $ProjectRoot "runtime"
 $statusPath = Join-Path $runtimeRoot "setup-status.txt"
 [System.IO.Directory]::CreateDirectory($runtimeRoot) | Out-Null
@@ -142,4 +142,3 @@ $timer.Add_Tick({
 
 $form.Add_Shown({ $timer.Start() })
 [System.Windows.Forms.Application]::Run($form)
-
