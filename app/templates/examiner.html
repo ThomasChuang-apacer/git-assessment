@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% block title %}考官模式｜Git 實作測驗{% endblock %}
+{% block header_action %}
+<a class="header-link" href="{{ url_for('main.home') }}">返回首頁</a>
+{% endblock %}
+{% block content %}
+<section class="examiner-page">
+  <div class="result-heading">
+    <div>
+      <p class="eyebrow">EXAMINER CONSOLE</p>
+      <h1>考官管理與系統檢查</h1>
+    </div>
+    {% if pin_required and unlocked %}
+    <form action="{{ url_for('main.lock_examiner') }}" method="post">
+      <input type="hidden" name="_api_token" value="{{ api_token }}">
+      <button class="button button-secondary" type="submit">鎖定考官模式</button>
+    </form>
+    {% endif %}
+  </div>
+
+  {% if pin_required and not unlocked %}
+  <div class="start-card examiner-login-card">
+    <h2>請輸入考官 PIN 碼</h2>
+    <p>共用考場模式已啟用。輸入正確 PIN 碼後可查看所有受測者成績、重設／修復與清理殘留資料。</p>
+    {% if error_message %}
+    <p class="field-error" role="alert">{{ error_message }}</p>
+    {% endif %}
+    <form action="{{ url_for('main.unlock_examiner') }}" method="post" class="start-form">
+      <input type="hidden" name="_api_token" value="{{ api_token }}">
+      <label for="examiner-pin">考官 PIN 碼</label>
+      <input id="examiner-pin" name="pin" type="password" autocomplete="current-password" required>
+      <button class="button button-primary button-wide" type="submit">解鎖考官模式</button>
+    </form>
+  </div>
+  {% else %}
+  {% if not pin_required %}
+  <div class="constraint-block">
+    <div class="constraint-title">個人本機模式提示</div>
+    <p>目前未設定考官 PIN 碼，因此所有本機使用者皆可直接查看歷史紀錄。若要於共用電腦保護受測者隱私，請在啟動前設定環境變數 <code>GIT_ASSESSMENT_EXAMINER_PIN</code>，或建立 <code>runtime/examiner.json</code>（內容為 <code>{"pin": "..."}</code>）後重啟。</p>
+  </div>
+  {% endif %}
+
+  <section class="examiner-card">
+    <div class="examiner-card-header">
+      <div>
+        <h2>儲存與殘留資料維護</h2>
+        <p>
+          隔離備份（quarantine）：<strong>{{ storage.quarantine_count }}</strong> 項 ·
+          歷史封存（archive）：<strong>{{ storage.archive_count }}</strong> 項 ·
+          舊版殘留：<strong>{{ (storage.legacy_items | join(', ')) if storage.legacy_items else '無' }}</strong>
+        </p>
+      </div>
+      <div class="examiner-actions">
+        <button class="button button-secondary" type="button" id="cleanup-quarantine">清理隔離備份與舊殘留</button>
+      </div>
+    </div>
+    <p id="cleanup-message" class="inline-message" role="status"></p>
+  </section>
+
+  <section class="examiner-card">
+    <h2>所有測驗紀錄（{{ sessions | length }}）</h2>
+    {% if sessions %}
+    <div class="history-list" role="list">
+      {% for item in sessions %}
+      <div class="history-row" role="listitem">
+        <div class="history-person">
+          <span class="history-avatar">{{ item.candidate_name[:1]|upper }}</span>
+          <div>
+            <strong>
+              {{ item.candidate_name }}
+              <span class="mode-badge">{{ '考試' if item.mode == 'exam' else '練習' }}</span>
+              {% if not item.healthy %}<span class="health-badge">需修復</span>{% endif %}
+            </strong>
+            <small>
+              開始：{{ item.started_at | format_dt }}
+              {% if item.summary %}
+                · 耗時：{{ item.summary.duration_display }}
+                · 重設：{{ item.summary.total_resets }}
+                {% if item.summary.total_repairs %} · 修復：{{ item.summary.total_repairs }}{% endif %}
+                · 提示：{{ item.summary.total_hints }}
+                · 校驗：{{ '檔案一致' if item.summary.integrity_ok else '檔案異動' }}
+              {% endif %}
+            </small>
+          </div>
+        </div>
+        <div class="history-progress">
+          <strong>{{ item.completed_count }}/{{ item.total }}</strong>
+          <span>{{ '已完成' if item.completed_at else '進行中' }}</span>
+        </div>
+        <div class="history-actions">
+          <a class="button button-secondary" href="{{ url_for('main.overview', session_id=item.session_id) }}">總覽</a>
+          <a class="button button-secondary" href="{{ url_for('main.result_summary', session_id=item.session_id) }}">結果</a>
+          <a class="button button-secondary" href="{{ url_for('main.get_result', session_id=item.session_id) }}" target="_blank" rel="noreferrer">JSON</a>
+          <button
+            class="button button-danger"
+            type="button"
+            data-delete-session="{{ item.session_id }}"
+            data-delete-candidate="{{ item.candidate_name }}"
+            data-delete-started="{{ item.started_at | format_dt }}"
+          >刪除</button>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <p class="muted-note">目前沒有測驗紀錄。</p>
+    {% endif %}
+  </section>
+  {% endif %}
+</section>
+{% endblock %}

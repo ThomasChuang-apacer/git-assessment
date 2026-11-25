@@ -4,37 +4,183 @@ folder = fileSystem.GetParentFolderName(WScript.ScriptFullName)
 Set processEnvironment = shell.Environment("PROCESS")
 processEnvironment("GIT_ASSESSMENT_HIDDEN") = "1"
 
-port = processEnvironment("GIT_ASSESSMENT_PORT")
-If Len(port) = 0 Then port = "8765"
-url = "http://127.0.0.1:" & port & "/"
+rawPort = Trim(processEnvironment("GIT_ASSESSMENT_PORT"))
+explicitPort = Len(rawPort) > 0
+port = rawPort
+If Not explicitPort Then port = "8765"
 
-If IsGitAssessmentRunning(url) Then
+savedUrl = ReadSavedServerUrl(folder & "\runtime\server-url.txt")
+savedRoot = ""
+savedState = "none"
+If Len(savedUrl) > 0 Then
+  savedState = CheckExistingInstance(savedUrl & "/api/health", savedUrl & "/", folder, savedRoot)
+  If savedState = "same" Then
+    If processEnvironment("GIT_ASSESSMENT_NO_BROWSER") <> "1" Then
+      shell.Run savedUrl & "/", 1, False
+    End If
+    WScript.Quit 0
+  End If
+End If
+
+url = "http://127.0.0.1:" & port & "/"
+healthUrl = "http://127.0.0.1:" & port & "/api/health"
+runningRoot = ""
+If LCase(savedUrl) <> LCase("http://127.0.0.1:" & port) Then
+  instanceState = CheckExistingInstance(healthUrl, url, folder, runningRoot)
+Else
+  instanceState = savedState
+  runningRoot = savedRoot
+End If
+
+If instanceState = "same" Then
   If processEnvironment("GIT_ASSESSMENT_NO_BROWSER") <> "1" Then
     shell.Run url, 1, False
   End If
   WScript.Quit 0
+ElseIf instanceState = "other" And explicitPort Then
+  Dim promptText, answer
+  If Len(runningRoot) > 0 Then
+    promptText = "Port " & port & " is already in use by another Git Assessment folder:" & vbCrLf & runningRoot & vbCrLf & vbCrLf & "Open " & url & " now so you can click Safe Shutdown?"
+  Else
+    promptText = "Port " & port & " is already in use by another Git Assessment instance." & vbCrLf & vbCrLf & "Open " & url & " now so you can click Safe Shutdown?"
+  End If
+  answer = MsgBox(promptText, vbYesNo + vbExclamation, "Git Assessment")
+  If answer = vbYes And processEnvironment("GIT_ASSESSMENT_NO_BROWSER") <> "1" Then
+    shell.Run url, 1, False
+  End If
+  WScript.Quit 3
 End If
 
 If Not fileSystem.FileExists(folder & "\.venv\Scripts\python.exe") Then
-  progressCommand = "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File " & Chr(34) & folder & "\scripts\First Start Git Assessment.ps1" & Chr(34) & " -ProjectRoot " & Chr(34) & folder & Chr(34)
+  progressCommand = "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File " & Chr(34) & folder & "\scripts\First Start Git Assessment.ps1" & Chr(34) & " -ProjectRoot " & Chr(34) & folder & Chr(34) & " -Mode FirstStart"
   shell.Run progressCommand, 1, False
-  WScript.Quit
+  WScript.Quit 0
+End If
+
+If processEnvironment("GIT_ASSESSMENT_NO_BROWSER") <> "1" Then
+  progressCommand = "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File " & Chr(34) & folder & "\scripts\First Start Git Assessment.ps1" & Chr(34) & " -ProjectRoot " & Chr(34) & folder & Chr(34) & " -Mode Starting"
+  shell.Run progressCommand, 1, False
+  WScript.Quit 0
 End If
 
 command = shell.ExpandEnvironmentStrings("%ComSpec%") & " /d /c " & Chr(34) & Chr(34) & folder & "\scripts\start.bat" & Chr(34) & Chr(34)
 shell.Run command, 0, False
 
-Function IsGitAssessmentRunning(address)
+Function NormalizePath(value)
+  Dim cleaned
+  cleaned = LCase(Trim(Replace(value, "/", "\")))
+  Do While Len(cleaned) > 1 And Right(cleaned, 1) = "\"
+    cleaned = Left(cleaned, Len(cleaned) - 1)
+  Loop
+  NormalizePath = cleaned
+End Function
+
+Function ExtractJsonString(text, key)
+  Dim pattern, pos, startPos, idx, ch, escaped, raw, hexCode
+  pattern = """" & key & """:"""
+  pos = InStr(1, text, pattern, vbTextCompare)
+  If pos = 0 Then
+    pattern = """" & key & """: """
+    pos = InStr(1, text, pattern, vbTextCompare)
+  End If
+  If pos = 0 Then
+    ExtractJsonString = ""
+    Exit Function
+  End If
+  startPos = pos + Len(pattern)
+  raw = ""
+  escaped = False
+  idx = startPos
+  Do While idx <= Len(text)
+    ch = Mid(text, idx, 1)
+    If escaped Then
+      If ch = "u" And idx + 4 <= Len(text) Then
+        hexCode = Mid(text, idx + 1, 4)
+        raw = raw & ChrW(CLng("&H" & hexCode))
+        idx = idx + 4
+      Else
+        raw = raw & ch
+      End If
+      escaped = False
+    ElseIf ch = "\" Then
+      escaped = True
+    ElseIf ch = """" Then
+      Exit Do
+    Else
+      raw = raw & ch
+    End If
+    idx = idx + 1
+  Loop
+  ExtractJsonString = raw
+End Function
+
+Function ReadSavedServerUrl(filePath)
+  On Error Resume Next
+  ReadSavedServerUrl = ""
+  If Not fileSystem.FileExists(filePath) Then
+    On Error GoTo 0
+    Exit Function
+  End If
+  Dim stream, content
+  Set stream = fileSystem.OpenTextFile(filePath, 1, False)
+  If Err.Number = 0 Then
+    content = Trim(stream.ReadAll)
+    stream.Close
+    content = Replace(Replace(content, vbCr, ""), vbLf, "")
+    Do While Right(content, 1) = "/"
+      content = Left(content, Len(content) - 1)
+    Loop
+    If Left(LCase(content), 17) = "http://127.0.0.1:" Then
+      ReadSavedServerUrl = content
+    End If
+  End If
+  Err.Clear
+  On Error GoTo 0
+End Function
+
+Function CheckExistingInstance(healthAddress, homeAddress, expectedFolder, ByRef foundRoot)
+  foundRoot = ""
   On Error Resume Next
   Set request = CreateObject("MSXML2.ServerXMLHTTP.6.0")
   request.setTimeouts 300, 300, 500, 500
-  request.Open "GET", address, False
+  request.Open "GET", healthAddress, False
   request.Send
 
+  If Err.Number <> 0 Then
+    CheckExistingInstance = "none"
+    Err.Clear
+    On Error GoTo 0
+    Exit Function
+  End If
+
+  If request.Status = 200 Then
+    Dim body, runningRoot
+    body = request.responseText
+    runningRoot = ExtractJsonString(body, "project_root")
+    If Len(runningRoot) > 0 Then
+      foundRoot = runningRoot
+      If NormalizePath(runningRoot) = NormalizePath(expectedFolder) Then
+        CheckExistingInstance = "same"
+      Else
+        CheckExistingInstance = "other"
+      End If
+      Err.Clear
+      On Error GoTo 0
+      Exit Function
+    End If
+  End If
+  Err.Clear
+
+  request.Open "GET", homeAddress, False
+  request.Send
   If Err.Number = 0 And request.Status = 200 Then
-    IsGitAssessmentRunning = InStr(1, request.responseText, "name=""git-assessment-token""", vbTextCompare) > 0
+    If InStr(1, request.responseText, "name=""git-assessment-token""", vbTextCompare) > 0 Then
+      CheckExistingInstance = "other"
+    Else
+      CheckExistingInstance = "none"
+    End If
   Else
-    IsGitAssessmentRunning = False
+    CheckExistingInstance = "none"
   End If
   Err.Clear
   On Error GoTo 0

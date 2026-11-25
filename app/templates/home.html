@@ -4,12 +4,15 @@
 <section class="hero-grid">
   <div class="hero-copy">
     <p class="eyebrow">LOCAL PRACTICAL ASSESSMENT</p>
-    <h1>動手實作，<br>確認 Git 基本功。</h1>
-    <p class="hero-lead">六個獨立任務，涵蓋日常最常用的提交、分支、rebase、conflict、stash 與 cherry-pick。</p>
-    <div class="feature-row" aria-label="測驗特色">
-      
-     
-      
+    <h1>Git 實作測驗</h1>
+    <p class="hero-lead">共 6 題本機操作題：commit、amend、branch、rebase 解衝突、stash、cherry-pick。</p>
+    <div class="rules-card" aria-label="測驗說明與規則">
+      <h2>測驗須知</h2>
+      <ul>
+        <li>全程於本機離線執行，不連線至公司 repository。</li>
+        <li>無時間限制，可查閱指令資料；每題皆可隨時重設重來。</li>
+        <li>關閉網頁不會清除進度，重新開啟即可從中斷處繼續。</li>
+      </ul>
     </div>
   </div>
 
@@ -29,7 +32,17 @@
       </div>
       <div class="environment-item {{ 'is-ready' if environment.runtime_issue_count == 0 else 'is-error' }}">
         <span class="status-dot"></span>
-        <div><strong>儲存狀態</strong><small>{{ '所有測驗紀錄正常' if environment.runtime_issue_count == 0 else environment.runtime_issue_count ~ ' 個項目需要檢查' }}</small></div>
+        <div>
+          <strong>儲存狀態</strong>
+          <small>
+            {% if environment.runtime_issue_count == 0 %}
+              所有測驗紀錄正常
+            {% else %}
+              {{ environment.runtime_issue_count }} 個項目需要檢查 ·
+              <a class="inline-link" href="{{ url_for('main.examiner_dashboard') if privacy_restricted else '#history-title' }}">前往處理</a>
+            {% endif %}
+          </small>
+        </div>
       </div>
     </div>
 
@@ -45,17 +58,33 @@
     <div class="or-divider"><span>或建立新測驗</span></div>
     {% endif %}
 
-    <form action="{{ url_for('main.create_session') }}" method="post" class="start-form">
+    <form action="{{ url_for('main.create_session') }}" method="post" class="start-form" novalidate>
       <input type="hidden" name="_api_token" value="{{ api_token }}">
       <input type="hidden" name="_confirm" value="create">
       <label for="candidate_name">姓名或識別代碼 <span class="required-mark" aria-hidden="true">*</span><span class="visually-hidden">（必填）</span></label>
       <p class="field-hint" id="candidate-name-hint">最多 80 個字元；按 Enter 也可建立測驗。</p>
-      <input id="candidate_name" name="candidate_name" maxlength="80" autocomplete="name" placeholder="例如：Woly Wu" aria-describedby="candidate-name-hint" required>
+      <input id="candidate_name" name="candidate_name" maxlength="80" autocomplete="name" placeholder="例如：Woly Wu" aria-describedby="candidate-name-hint candidate-name-error" required>
+      <p class="field-error" id="candidate-name-error" role="alert" hidden></p>
+
+      <fieldset class="mode-picker">
+        <legend>測驗模式</legend>
+        <label class="mode-option" for="mode-practice">
+          <input type="radio" id="mode-practice" name="mode" value="practice" aria-labelledby="mode-practice-label" aria-describedby="mode-practice-desc" checked>
+          <span><strong id="mode-practice-label">練習模式</strong><small id="mode-practice-desc">顯示逐步指引與修正建議</small></span>
+        </label>
+        <label class="mode-option" for="mode-exam">
+          <input type="radio" id="mode-exam" name="mode" value="exam" aria-labelledby="mode-exam-label" aria-describedby="mode-exam-desc">
+          <span><strong id="mode-exam-label">考試模式</strong><small id="mode-exam-desc">僅提供任務目標與限制，提示另計次數</small></span>
+        </label>
+      </fieldset>
+
       <button class="button button-primary button-wide" type="submit" {% if not environment.ready %}disabled{% endif %}>
         建立新測驗 <span aria-hidden="true">→</span>
       </button>
     </form>
-    <a class="history-jump" href="#history-title">查看這台電腦上的歷史紀錄</a>
+    <a class="history-jump" href="{{ url_for('main.examiner_dashboard') if privacy_restricted else '#history-title' }}">
+      {{ '前往考官模式查看歷史紀錄' if privacy_restricted else '查看這台電腦上的歷史紀錄' }}
+    </a>
   </div>
 </section>
 
@@ -67,13 +96,26 @@
     </div>
     <p>進度會保存在這台電腦，可從中斷處繼續。</p>
   </div>
-  {% if recent_sessions %}
+  {% if privacy_restricted %}
+  <div class="empty-state" role="status">
+    <strong>已啟用共用考場隱私保護</strong>
+    <p>為保護受測者成績與紀錄，歷史清單、刪除與修復功能僅於考官模式顯示。</p>
+    <p><a class="button button-secondary" href="{{ url_for('main.examiner_dashboard') }}" style="margin-top: 12px;">前往考官模式</a></p>
+  </div>
+  {% elif recent_sessions %}
   <div class="history-list" role="list">
     {% for session in recent_sessions %}
     <div class="history-row {{ 'is-unavailable' if not session.available else '' }}" role="listitem">
       <div class="history-person">
         <span class="history-avatar">{{ session.candidate_name[:1]|upper }}</span>
-        <div><strong>{{ session.candidate_name }}</strong><small>{{ session.started_at }}</small></div>
+        <div>
+          <strong>
+            {{ session.candidate_name }}
+            <span class="mode-badge">{{ '考試' if session.mode == 'exam' else '練習' }}</span>
+            {% if not session.healthy %}<span class="health-badge">需修復</span>{% endif %}
+          </strong>
+          <small>{{ session.started_at | format_dt }}</small>
+        </div>
       </div>
       <div class="history-progress">
         <strong>{{ session.completed_count }}/{{ session.total }}</strong>
@@ -81,9 +123,13 @@
       </div>
       <div class="history-actions">
         {% if session.available %}
-        <a class="button button-secondary" href="{{ url_for('main.overview', session_id=session.session_id) }}">
-          {{ '查看結果' if session.completed_at else '繼續測驗' }}
-        </a>
+          {% if not session.healthy %}
+          <a class="button button-secondary" href="{{ url_for('main.overview', session_id=session.session_id) }}#repair-title">前往修復</a>
+          {% elif session.completed_at %}
+          <a class="button button-secondary" href="{{ url_for('main.result_summary', session_id=session.session_id) }}">查看結果</a>
+          {% else %}
+          <a class="button button-secondary" href="{{ url_for('main.overview', session_id=session.session_id) }}">繼續測驗</a>
+          {% endif %}
         {% else %}
         <span class="unavailable-label">Workspace 無法使用</span>
         {% endif %}
@@ -92,7 +138,7 @@
           type="button"
           data-delete-session="{{ session.session_id }}"
           data-delete-candidate="{{ session.candidate_name }}"
-          data-delete-started="{{ session.started_at }}"
+          data-delete-started="{{ session.started_at | format_dt }}"
         >刪除</button>
       </div>
     </div>

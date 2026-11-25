@@ -8,11 +8,11 @@ param(
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $logPath = Join-Path $projectRoot "runtime\logs\git-assessment.log"
-$port = if ($env:GIT_ASSESSMENT_PORT) { $env:GIT_ASSESSMENT_PORT } else { "8765" }
+$portDesc = if ($env:GIT_ASSESSMENT_PORT) { "連接埠 $($env:GIT_ASSESSMENT_PORT)" } else { "連接埠 8765–8799" }
 
 $message = switch ($ExitCode) {
     3 {
-        "Git Assessment 無法啟動，因為連接埠 $port 已被其他程式使用。`r`n`r`n請關閉占用該連接埠的程式後再試；詳細資訊請查看：`r`n$logPath"
+        "Git Assessment 無法啟動，因為$portDesc 已被其他程式使用。`r`n`r`n請關閉占用該連接埠的程式後再試；詳細資訊請查看：`r`n$logPath"
     }
     default {
         "Git Assessment 無法啟動。請確認 Python 3.11+ 與 Git 可正常使用。`r`n`r`n詳細資訊請查看：`r`n$logPath"

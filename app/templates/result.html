@@ -10,17 +10,24 @@
       <p class="eyebrow">ASSESSMENT RESULT</p>
       <h1>測驗結果摘要</h1>
     </div>
-    <button class="button button-primary" type="button" id="download-result-png">保存成 PNG</button>
+    <div class="result-actions">
+      <button class="button button-secondary" type="button" id="copy-result-text">複製文字摘要</button>
+      <button class="button button-primary" type="button" id="download-result-png">保存成 PNG</button>
+    </div>
   </div>
 
   <div class="result-card" id="result-summary-card">
     <div class="result-person">
       <span class="history-avatar">{{ summary.candidate_name[:1]|upper }}</span>
       <div>
-        <span>姓名</span>
+        <span>姓名 <span class="mode-badge">{{ summary.mode_label }}</span></span>
         <h2>{{ summary.candidate_name }}</h2>
-        <small>開始時間：{{ summary.started_at }}</small>
-        {% if summary.completed_at %}<small>完成時間：{{ summary.completed_at }}</small>{% endif %}
+        <div class="result-meta">
+          <small>開始時間：{{ summary.started_at | format_dt }}</small>
+          {% if summary.completed_at %}<small>完成時間：{{ summary.completed_at | format_dt }}</small>{% endif %}
+          <small>總作答時間：{{ summary.duration_display }}</small>
+          <small>校驗碼：<code>{{ summary.integrity_short }}</code>（{{ '檔案一致' if summary.integrity_ok else '檔案異動' }}）</small>
+        </div>
       </div>
       <div class="result-score">
         <strong>{{ summary.completed_count }}/{{ summary.total }}</strong>
@@ -32,13 +39,33 @@
       {% for task in summary.tasks %}
       <div class="result-task status-{{ task.status }}">
         <span class="result-task-number">0{{ task.order }}</span>
-        <div><strong>{{ task.title }}</strong><small>檢查次數：{{ task.check_attempts }}</small></div>
+        <div>
+          <strong>{{ task.title }}</strong>
+          <small>
+            檢查次數：{{ task.check_attempts }}
+            · 重設次數：{{ task.reset_count }}
+            {% if task.repair_count %} · 修復：{{ task.repair_count }} 次{% endif %}
+            {% if task.hints_used %} · 提示：{{ task.hints_used }} 次{% endif %}
+            {% if task.status == 'completed' %} · 耗時：{{ task.duration_display }}{% endif %}
+          </small>
+        </div>
         <span class="result-status">
           {% if task.status == 'completed' %}✓ 已完成{% elif task.status == 'in_progress' %}進行中{% else %}尚未完成{% endif %}
         </span>
       </div>
       {% endfor %}
     </div>
+
+    {% if summary.events %}
+    <details class="timeline-block">
+      <summary>檢視操作紀錄時間軸（共 {{ summary.events | length }} 筆）</summary>
+      <ol class="timeline-list">
+        {% for item in summary.events %}
+        <li><time>{{ item.timestamp | format_dt }}</time><span>{{ item.label }}</span></li>
+        {% endfor %}
+      </ol>
+    </details>
+    {% endif %}
   </div>
   <p id="result-download-message" class="action-message" role="status"></p>
   <script id="result-summary-data" type="application/json">{{ summary|tojson }}</script>
