@@ -1,6 +1,8 @@
 {% extends "base.html" %}
 {% block title %}任務總覽｜Git 實作測驗{% endblock %}
-{% block header_action %}<span class="candidate-chip">{{ result.candidate_name }}</span>{% endblock %}
+{% block header_action %}
+<span class="candidate-chip">{{ result.candidate_name }} · {{ '考試模式' if result.mode == 'exam' else '練習模式' }}</span>
+{% endblock %}
 {% block content %}
 <section class="overview-header">
   <div>
@@ -24,27 +26,35 @@
 
 {% set broken = task_health.values() | rejectattr('healthy') | list %}
 {% if broken %}
-<section class="constraint-block" aria-labelledby="repair-title">
-  <div class="constraint-title" id="repair-title">需要修復的題目</div>
-  <p>系統會先將損壞資料備份到 quarantine，再重建該題。修復後該題會回到尚未開始。</p>
+<section class="constraint-block" id="repair-title" aria-labelledby="repair-heading">
+  <div class="constraint-title" id="repair-heading">需要修復的題目</div>
+  <p>系統會先將損壞的資料安全備份，再重建該題。修復後該題會回到尚未開始（歷史檢查紀錄仍會保留）。</p>
   {% for question in questions %}
     {% if not task_health[question.id].healthy %}
     <p>
       <strong>Task 0{{ question.order }}：</strong>{{ task_health[question.id].message }}
+      {% if examiner_unlocked %}
       <button class="button button-secondary" type="button"
               data-repair-task="{{ question.id }}"
               data-repair-session="{{ result.session_id }}"
               data-repair-completed="{{ 'yes' if states[question.id].status == 'completed' else 'no' }}">備份並修復</button>
+      {% else %}
+      <span class="muted-note">（請聯絡考官進入考官模式進行修復）</span>
+      {% endif %}
     </p>
     {% endif %}
   {% endfor %}
 </section>
 {% endif %}
 
-{% if completed == questions|length %}
+{% if completed == questions|length and not broken %}
 <div class="completion-banner">
   <span class="completion-icon" aria-hidden="true">✓</span>
-  <div><strong>所有任務都完成了</strong><p>結果已保存，可以點擊下方「查看／保存結果」下載結果圖片。</p></div>
+  <div class="completion-copy">
+    <strong>所有任務都完成了</strong>
+    <p>結果已自動保存，可以立即前往結果摘要頁面保存 PNG 成績單。</p>
+  </div>
+  <a class="button button-primary" href="{{ url_for('main.result_summary', session_id=result.session_id) }}">查看／保存結果 →</a>
 </div>
 {% endif %}
 
@@ -55,13 +65,19 @@
     <div class="task-card-top">
       <span class="task-number">0{{ question.order }}</span>
       <span class="state-label">
-        {% if state.status == 'completed' %}✓ 已完成{% elif state.status == 'in_progress' %}進行中{% else %}尚未開始{% endif %}
+        {% if state.status == 'completed' %}✓ 已完成{% elif state.check_attempts %}進行中{% elif state.status == 'in_progress' %}已開啟{% else %}尚未開始{% endif %}
       </span>
     </div>
     <h2>{{ question.title }}</h2>
-    <p>{{ question.description }}</p>
+    <p>{{ question.exam_goal if result.mode == 'exam' and question.exam_goal else question.description }}</p>
     <div class="task-card-footer">
-      <span>{{ question.checks|length }} 項完成條件</span>
+      <span>
+        {% if state.last_checks %}
+          上次檢查：{{ state.last_checks | selectattr('passed') | list | length }} / {{ state.last_checks | length }} 項通過
+        {% else %}
+          {{ question.checks|length }} 項完成條件・尚未檢查
+        {% endif %}
+      </span>
       <span class="card-arrow" aria-hidden="true">→</span>
     </div>
   </a>
@@ -69,10 +85,12 @@
 </section>
 
 <footer class="session-footer">
-  <span>開始時間：{{ result.started_at }}</span>
+  <span>開始時間：{{ result.started_at | format_dt }}</span>
   <span class="result-links">
     <a href="{{ url_for('main.result_summary', session_id=result.session_id) }}">查看／保存結果</a>
-    <a href="{{ url_for('main.get_result', session_id=result.session_id) }}" target="_blank" rel="noreferrer">原始 JSON</a>
+    {% if examiner_unlocked %}
+    <a href="{{ url_for('main.get_result', session_id=result.session_id) }}" target="_blank" rel="noreferrer">進階：原始紀錄（JSON）</a>
+    {% endif %}
   </span>
 </footer>
 {% endblock %}

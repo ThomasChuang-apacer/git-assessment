@@ -9,7 +9,8 @@ from pathlib import Path
 
 
 class TemplateBuilder:
-    VERSION = 7
+    VERSION = 8
+    TASK05_MIN_VERSION = 5
     _validation_cache: dict[tuple[str, bool], tuple[int, tuple[bool, str]]] = {}
 
     def __init__(self, root: Path):
@@ -90,6 +91,11 @@ class TemplateBuilder:
             if tracked_main != remote_main or remote_main == pending_main:
                 return False, "task04 假遠端的初始／待更新 refs 不正確"
             self._git(self.root / "task06" / "repo", "rev-parse", "--verify", "refs/heads/fix/validation")
+            if (
+                self._git(self.root / "task06" / "repo", "rev-list", "--count", "assessment-start..fix/validation")
+                != "2"
+            ):
+                return False, "task06 的 fix/validation 應包含 2 筆 commit"
             task05_repo = self.root / "task05" / "repo"
             task05_origin = self.root / "task05" / "origin.git"
             remote_hotfix = self._git(task05_origin, "rev-parse", "refs/heads/hotfix/check-status")
@@ -235,6 +241,8 @@ class TemplateBuilder:
         self._commit_all(repo, "Initial validator")
         self._git(repo, "tag", "assessment-start")
         self._git(repo, "switch", "-c", "fix/validation")
+        self._write(repo, "notes/validator_todo.md", "# Validator Notes\n\nTODO: review edge cases.\n")
+        self._commit_all(repo, "Add validator todo notes")
         self._write(
             repo,
             "src/validator.py",

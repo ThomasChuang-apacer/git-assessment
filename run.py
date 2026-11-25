@@ -4,6 +4,7 @@ import logging
 from logging.handlers import RotatingFileHandler
 import os
 from pathlib import Path
+import re
 import socket
 import threading
 import time
@@ -17,6 +18,12 @@ HOST = "127.0.0.1"
 PORT = int(os.environ.get("GIT_ASSESSMENT_PORT", "8765"))
 ROOT = Path(__file__).resolve().parent
 RUNTIME = ROOT / "runtime"
+ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+
+
+class AnsiStrippingFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        return ANSI_ESCAPE_RE.sub("", super().format(record))
 
 
 def configure_logging() -> None:
@@ -25,7 +32,7 @@ def configure_logging() -> None:
     handler = RotatingFileHandler(
         log_dir / "git-assessment.log", maxBytes=1_000_000, backupCount=3, encoding="utf-8"
     )
-    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+    handler.setFormatter(AnsiStrippingFormatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
     logging.getLogger().setLevel(logging.INFO)
     logging.getLogger().addHandler(handler)
 
@@ -87,7 +94,7 @@ def main() -> int:
     logger = logging.getLogger("git_assessment.run")
     try:
         lock_handle = acquire_instance_lock()
-    except RuntimeError as exc:
+    except RuntimeError:
         logger.info("Git Assessment 已在執行，開啟現有網站")
         open_browser(f"http://{HOST}:{PORT}")
         return 0
@@ -103,7 +110,9 @@ def main() -> int:
         app.extensions["git_assessment_shutdown"] = server.shutdown
         if os.environ.get("GIT_ASSESSMENT_NO_BROWSER") != "1":
             threading.Thread(target=open_browser_when_ready, daemon=True).start()
-        logger.info("Git Assessment 啟動於 http://%s:%s", HOST, PORT)
+        url = f"http://{HOST}:{PORT}"
+        logger.info("Git Assessment 啟動於 %s", url)
+        print(f"Git Assessment 已啟動：{url}（請保持此視窗開啟，結束測驗請按網頁右上角「安全關閉」）", flush=True)
         server.serve_forever()
         logger.info("Git Assessment 已安全關閉")
         return 0

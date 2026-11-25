@@ -4,11 +4,11 @@
 <a class="header-link" href="{{ url_for('main.overview', session_id=result.session_id) }}">返回任務總覽</a>
 {% endblock %}
 {% block content %}
-<div class="task-layout" data-session-id="{{ result.session_id }}" data-task-id="{{ question.id }}">
+<div class="task-layout" data-session-id="{{ result.session_id }}" data-task-id="{{ question.id }}" data-all-completed="{{ 'yes' if result.completed_at else 'no' }}">
   <article class="task-main">
     <div class="task-heading-row">
       <div>
-        <p class="eyebrow">TASK 0{{ question.order }}</p>
+        <p class="eyebrow">TASK 0{{ question.order }} · {{ '考試模式' if result.mode == 'exam' else '練習模式' }}</p>
         <div class="task-title-line">
           <h1>{{ question.title }}</h1>
           <button class="button repository-guide-button task-guide-button" type="button" id="open-repository-guide">
@@ -16,10 +16,22 @@
           </button>
         </div>
       </div>
-      <div class="mini-progress" role="status" aria-live="polite"><strong id="completed-count">{{ completed }}</strong> / {{ total }} 完成</div>
+      <div class="mini-progress" role="status" aria-live="polite">整體進度 <strong id="completed-count">{{ completed }}</strong> / {{ total }} 題完成</div>
     </div>
 
     <p class="task-description">{{ question.description }}</p>
+
+    <section class="repo-block">
+      <div>
+        <span class="repo-label">REPOSITORY · 請在這個資料夾執行 Git 指令</span>
+        <code id="repo-path" title="{{ repo }}">{{ repo }}</code>
+      </div>
+      <div class="repo-actions">
+        <button class="button button-secondary" type="button" data-copy-target="repo-path" data-copy-label="路徑">複製路徑</button>
+        <button class="button button-secondary" type="button" id="open-folder">開啟資料夾</button>
+      </div>
+      <p id="repo-message" class="inline-message" role="status"></p>
+    </section>
 
     {% include "_repository_guide.html" %}
 
@@ -30,21 +42,35 @@
     </section>
     {% endif %}
 
+    {% if result.mode == 'exam' and question.exam_goal %}
+    <section class="instruction-block">
+      <h2>任務目標</h2>
+      <p class="exam-goal-text">{{ question.exam_goal }}</p>
+    </section>
+    {% else %}
     <section class="instruction-block">
       <h2>任務要求</h2>
       <ol>
         {% for item in question.instructions %}<li>{{ item }}</li>{% endfor %}
       </ol>
     </section>
+    {% endif %}
 
     {% if question.remote_update_action %}
     <section class="constraint-block">
       <div class="constraint-title">模擬遠端操作</div>
       {% if remote_update_status.available %}
       <p>{{ question.remote_update_action.description }}</p>
-      <button class="button button-secondary" type="button" id="simulate-remote-update">
+      <button class="button button-secondary" type="button" id="simulate-remote-update" {% if remote_update_status.remote_updated %}disabled{% endif %}>
         {% if remote_update_status.remote_updated %}遠端更新已建立{% else %}{{ question.remote_update_action.button_label }}{% endif %}
       </button>
+      <p id="remote-message" class="inline-message {{ 'success' if remote_update_status.remote_updated and not remote_update_status.fetched else '' }}" role="status">
+        {%- if remote_update_status.remote_updated and not remote_update_status.fetched -%}
+          遠端 main 已更新，下一步請在 Terminal 執行 git fetch origin。
+        {%- elif remote_update_status.fetched -%}
+          本機已完成遠端同步（origin/main 已是最新）。
+        {%- endif -%}
+      </p>
       {% else %}
       <p>{{ remote_update_status.message }}</p>
       {% endif %}
@@ -60,7 +86,7 @@
             <span class="code-language">{{ block.language }}</span>
             <h2>{{ block.title }}</h2>
           </div>
-          <button class="button button-secondary" type="button" data-copy-target="task-code-{{ loop.index }}">複製程式碼</button>
+          <button class="button button-secondary" type="button" data-copy-target="task-code-{{ loop.index }}" data-copy-label="程式碼">複製程式碼</button>
         </div>
         <pre><code id="task-code-{{ loop.index }}">{{ block.content }}</code></pre>
       </div>
@@ -75,16 +101,25 @@
     </section>
     {% endif %}
 
-    <section class="repo-block">
-      <div>
-        <span class="repo-label">REPOSITORY</span>
-        <code id="repo-path">{{ repo }}</code>
+    {% if question.hints %}
+    <section class="hint-block" aria-labelledby="hint-section-title">
+      <div class="hint-header">
+        <h2 id="hint-section-title">操作提示</h2>
+        <span class="hint-counter">已使用 <strong id="hints-used-count">{{ state.hints_used or 0 }}</strong> / {{ question.hints | length }} 條</span>
       </div>
-      <div class="repo-actions">
-        <button class="button button-secondary" type="button" data-copy-target="repo-path">複製路徑</button>
-        <button class="button button-secondary" type="button" id="open-folder">開啟資料夾</button>
+      <div class="hint-list">
+        {% for hint in question.hints %}
+        {% set seen = loop.index0 in (state.viewed_hints or []) %}
+        <div class="hint-item">
+          <button class="button button-secondary hint-toggle" type="button" data-hint-index="{{ loop.index0 }}" aria-expanded="{{ 'true' if seen else 'false' }}">
+            {{ '提示 ' ~ loop.index ~ '（已檢視）' if seen else '展開提示 ' ~ loop.index }}
+          </button>
+          <p class="hint-body" id="hint-body-{{ loop.index0 }}" {% if not seen %}hidden{% endif %}>{{ hint }}</p>
+        </div>
+        {% endfor %}
       </div>
     </section>
+    {% endif %}
 
     <div class="task-navigation">
       {% if previous %}
@@ -101,10 +136,13 @@
   <aside class="check-panel" aria-labelledby="task-status-title">
     <div class="check-panel-header">
       <div>
-        <span class="card-kicker">完成條件</span>
-        <h2 id="task-status-title">{% if state.status == 'completed' %}任務已完成{% else %}準備好就檢查{% endif %}</h2>
+        <span class="card-kicker">
+          完成條件 · <span id="check-summary">{% if state.last_checks %}{{ state.last_checks | selectattr('passed') | list | length }} / {{ state.last_checks | length }} 通過{% else %}共 {{ question.checks | length }} 項{% endif %}</span>
+        </span>
+        <h2 id="task-status-title">{% if state.status == 'completed' %}任務已完成{% elif state.last_checks %}還有項目未完成{% else %}準備好就檢查{% endif %}</h2>
+        <small class="attempt-counter">已檢查 <strong id="attempt-count">{{ state.check_attempts }}</strong> 次{% if state.reset_count %} · 重設 {{ state.reset_count }} 次{% endif %}</small>
       </div>
-      <span id="task-checkmark" class="big-check {{ 'is-complete' if state.status == 'completed' else '' }}" aria-hidden="true">✓</span>
+      <span id="task-checkmark" class="big-check {{ 'is-complete' if state.status == 'completed' else ('is-failed' if state.last_checks else '') }}" aria-hidden="true">{{ '✓' if state.status == 'completed' else ('!' if state.last_checks else '·') }}</span>
     </div>
 
     <div id="check-list" class="check-list" aria-live="polite">
@@ -125,9 +163,21 @@
       {% endif %}
     </div>
 
-    <button class="button button-primary button-wide" type="button" id="check-task">檢查結果</button>
+    <a class="button button-primary button-wide" id="next-step-link"
+       data-next-href="{% if next_task %}{{ url_for('main.task', session_id=result.session_id, task_id=next_task.id) }}{% else %}{{ url_for('main.overview', session_id=result.session_id) }}{% endif %}"
+       data-next-label="{% if next_task %}前往下一題 →{% else %}返回任務總覽 →{% endif %}"
+       data-result-href="{{ url_for('main.result_summary', session_id=result.session_id) }}"
+       href="{% if result.completed_at %}{{ url_for('main.result_summary', session_id=result.session_id) }}{% elif next_task %}{{ url_for('main.task', session_id=result.session_id, task_id=next_task.id) }}{% else %}{{ url_for('main.overview', session_id=result.session_id) }}{% endif %}"
+       {% if state.status != 'completed' %}hidden{% endif %}>
+      {% if result.completed_at %}查看／保存結果 →{% elif next_task %}前往下一題 →{% else %}返回任務總覽 →{% endif %}
+    </a>
+    <button class="button {{ 'button-secondary' if state.status == 'completed' else 'button-primary' }} button-wide" type="button" id="check-task" data-check-trigger>{% if state.status == 'completed' %}重新檢查{% else %}檢查結果{% endif %}</button>
     <button class="button button-quiet button-wide" type="button" id="reset-task">重設本題</button>
     <p id="action-message" class="action-message" role="status"></p>
   </aside>
+</div>
+<div class="check-dock" id="check-dock">
+  <span class="check-dock-summary">完成條件 <strong id="check-dock-summary">{% if state.last_checks %}{{ state.last_checks | selectattr('passed') | list | length }} / {{ state.last_checks | length }} 通過{% else %}尚未檢查{% endif %}</strong></span>
+  <button class="button button-primary" type="button" data-check-trigger>檢查結果</button>
 </div>
 {% endblock %}

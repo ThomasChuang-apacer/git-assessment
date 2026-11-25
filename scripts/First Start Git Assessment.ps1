@@ -1,6 +1,8 @@
 ﻿param(
     [Parameter(Mandatory = $true)]
-    [string]$ProjectRoot
+    [string]$ProjectRoot,
+    [ValidateSet("FirstStart", "Starting")]
+    [string]$Mode = "FirstStart"
 )
 
 $ErrorActionPreference = "Stop"
@@ -12,11 +14,13 @@ $ProjectRoot = [System.IO.Path]::GetFullPath($ProjectRoot)
 $startBat = Join-Path $ProjectRoot "scripts\start.bat"
 $runtimeRoot = Join-Path $ProjectRoot "runtime"
 $statusPath = Join-Path $runtimeRoot "setup-status.txt"
+$logPath = Join-Path $runtimeRoot "logs\git-assessment.log"
 [System.IO.Directory]::CreateDirectory($runtimeRoot) | Out-Null
 Remove-Item -LiteralPath $statusPath -Force -ErrorAction SilentlyContinue
 
+$isFirstStart = $Mode -eq "FirstStart"
 $form = New-Object System.Windows.Forms.Form
-$form.Text = "Git Assessment 第一次啟動"
+$form.Text = if ($isFirstStart) { "Git Assessment 第一次啟動" } else { "Git Assessment 啟動中" }
 $form.ClientSize = New-Object System.Drawing.Size(500, 190)
 $form.StartPosition = "CenterScreen"
 $form.FormBorderStyle = "FixedDialog"
@@ -31,7 +35,7 @@ $title.AutoSize = $false
 $title.Location = New-Object System.Drawing.Point(30, 24)
 $title.Size = New-Object System.Drawing.Size(440, 32)
 $title.Font = New-Object System.Drawing.Font("Microsoft JhengHei UI", 14, [System.Drawing.FontStyle]::Bold)
-$title.Text = "正在準備 Git Assessment"
+$title.Text = if ($isFirstStart) { "正在準備 Git Assessment" } else { "正在啟動 Git Assessment" }
 $form.Controls.Add($title)
 
 $status = New-Object System.Windows.Forms.Label
@@ -40,7 +44,7 @@ $status.Location = New-Object System.Drawing.Point(31, 66)
 $status.Size = New-Object System.Drawing.Size(438, 24)
 $status.Font = New-Object System.Drawing.Font("Microsoft JhengHei UI", 10)
 $status.ForeColor = [System.Drawing.Color]::FromArgb(82, 113, 101)
-$status.Text = "正在檢查第一次啟動環境…"
+$status.Text = if ($isFirstStart) { "正在檢查第一次啟動環境…" } else { "正在檢查題目環境與啟動本機伺服器…" }
 $form.Controls.Add($status)
 
 $progress = New-Object System.Windows.Forms.ProgressBar
@@ -56,7 +60,7 @@ $hint.Location = New-Object System.Drawing.Point(31, 139)
 $hint.Size = New-Object System.Drawing.Size(438, 22)
 $hint.Font = New-Object System.Drawing.Font("Microsoft JhengHei UI", 9)
 $hint.ForeColor = [System.Drawing.Color]::FromArgb(100, 116, 109)
-$hint.Text = "第一次需要建立環境並下載 Flask，請保持網路連線。"
+$hint.Text = if ($isFirstStart) { "第一次需要建立環境並安裝 Flask（若有離線套件會自動離線安裝）。" } else { "請稍候，就緒後會自動開啟瀏覽器並關閉此視窗。" }
 $form.Controls.Add($hint)
 
 $process = New-Object System.Diagnostics.Process
@@ -75,7 +79,7 @@ try {
     }
 } catch {
     [System.Windows.Forms.MessageBox]::Show(
-        "Git Assessment 無法開始第一次啟動。請確認 Python 3.11+ 與 Git for Windows 已安裝。",
+        "Git Assessment 無法開始啟動。請確認 Python 3.11+ 與 Git for Windows 已安裝。`r`n`r`n紀錄位置：$logPath",
         "Git Assessment",
         "OK",
         "Error"
@@ -101,8 +105,8 @@ $timer.Add_Tick({
         }
         switch ($phase) {
             "create-venv" { $status.Text = "正在建立專用 Python 環境…" }
-            "install-packages" { $status.Text = "正在下載並安裝 Flask…" }
-            "start-server" { $status.Text = "環境已完成，正在啟動 Git Assessment…" }
+            "install-packages" { $status.Text = "正在安裝 Flask 套件…" }
+            "start-server" { $status.Text = if ($isFirstStart) { "環境已完成，正在啟動 Git Assessment…" } else { "正在檢查題目環境並開啟瀏覽器…" } }
         }
     }
 
@@ -110,7 +114,7 @@ $timer.Add_Tick({
         $timer.Stop()
         Remove-Item -LiteralPath $statusPath -Force -ErrorAction SilentlyContinue
         [System.Windows.Forms.MessageBox]::Show(
-            "Git Assessment 無法完成第一次啟動。請確認 Python 3.11+、Git for Windows 與網路連線後再試一次。",
+            "Git Assessment 無法完成啟動。請確認 Python 3.11+、Git for Windows 或連接埠 $port 是否被占用。`r`n`r`n詳細紀錄：$logPath",
             "Git Assessment",
             "OK",
             "Error"
@@ -130,7 +134,7 @@ $timer.Add_Tick({
                 $status.Text = "準備完成，正在開啟瀏覽器…"
                 Remove-Item -LiteralPath $statusPath -Force -ErrorAction SilentlyContinue
                 [System.Windows.Forms.Application]::DoEvents()
-                Start-Sleep -Milliseconds 800
+                Start-Sleep -Milliseconds 600
                 $form.Close()
             }
         } catch {
