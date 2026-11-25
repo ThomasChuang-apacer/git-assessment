@@ -14,4 +14,5 @@ if errorlevel 1 (
   echo Git Assessment stopped.
 )
 del /q "runtime\git-assessment.pid" >nul 2>&1
+del /q "runtime\server-url.txt" >nul 2>&1
 pause
