@@ -4,19 +4,50 @@ folder = fileSystem.GetParentFolderName(WScript.ScriptFullName)
 Set processEnvironment = shell.Environment("PROCESS")
 processEnvironment("GIT_ASSESSMENT_HIDDEN") = "1"
 
-port = processEnvironment("GIT_ASSESSMENT_PORT")
-If Len(port) = 0 Then port = "8765"
+rawPort = Trim(processEnvironment("GIT_ASSESSMENT_PORT"))
+explicitPort = Len(rawPort) > 0
+port = rawPort
+If Not explicitPort Then port = "8765"
+
+savedUrl = ReadSavedServerUrl(folder & "\runtime\server-url.txt")
+savedRoot = ""
+savedState = "none"
+If Len(savedUrl) > 0 Then
+  savedState = CheckExistingInstance(savedUrl & "/api/health", savedUrl & "/", folder, savedRoot)
+  If savedState = "same" Then
+    If processEnvironment("GIT_ASSESSMENT_NO_BROWSER") <> "1" Then
+      shell.Run savedUrl & "/", 1, False
+    End If
+    WScript.Quit 0
+  End If
+End If
+
 url = "http://127.0.0.1:" & port & "/"
 healthUrl = "http://127.0.0.1:" & port & "/api/health"
+runningRoot = ""
+If LCase(savedUrl) <> LCase("http://127.0.0.1:" & port) Then
+  instanceState = CheckExistingInstance(healthUrl, url, folder, runningRoot)
+Else
+  instanceState = savedState
+  runningRoot = savedRoot
+End If
 
-instanceState = CheckExistingInstance(healthUrl, url, folder)
 If instanceState = "same" Then
   If processEnvironment("GIT_ASSESSMENT_NO_BROWSER") <> "1" Then
     shell.Run url, 1, False
   End If
   WScript.Quit 0
-ElseIf instanceState = "other" Then
-  MsgBox "Port " & port & " is already in use by another Git Assessment folder." & vbCrLf & vbCrLf & "Please close the running Git Assessment first, or set a different GIT_ASSESSMENT_PORT before starting.", vbExclamation, "Git Assessment"
+ElseIf instanceState = "other" And explicitPort Then
+  Dim promptText, answer
+  If Len(runningRoot) > 0 Then
+    promptText = "Port " & port & " is already in use by another Git Assessment folder:" & vbCrLf & runningRoot & vbCrLf & vbCrLf & "Open " & url & " now so you can click Safe Shutdown?"
+  Else
+    promptText = "Port " & port & " is already in use by another Git Assessment instance." & vbCrLf & vbCrLf & "Open " & url & " now so you can click Safe Shutdown?"
+  End If
+  answer = MsgBox(promptText, vbYesNo + vbExclamation, "Git Assessment")
+  If answer = vbYes And processEnvironment("GIT_ASSESSMENT_NO_BROWSER") <> "1" Then
+    shell.Run url, 1, False
+  End If
   WScript.Quit 3
 End If
 
@@ -83,18 +114,51 @@ Function ExtractJsonString(text, key)
   ExtractJsonString = raw
 End Function
 
-Function CheckExistingInstance(healthAddress, homeAddress, expectedFolder)
+Function ReadSavedServerUrl(filePath)
+  On Error Resume Next
+  ReadSavedServerUrl = ""
+  If Not fileSystem.FileExists(filePath) Then
+    On Error GoTo 0
+    Exit Function
+  End If
+  Dim stream, content
+  Set stream = fileSystem.OpenTextFile(filePath, 1, False)
+  If Err.Number = 0 Then
+    content = Trim(stream.ReadAll)
+    stream.Close
+    content = Replace(Replace(content, vbCr, ""), vbLf, "")
+    Do While Right(content, 1) = "/"
+      content = Left(content, Len(content) - 1)
+    Loop
+    If Left(LCase(content), 17) = "http://127.0.0.1:" Then
+      ReadSavedServerUrl = content
+    End If
+  End If
+  Err.Clear
+  On Error GoTo 0
+End Function
+
+Function CheckExistingInstance(healthAddress, homeAddress, expectedFolder, ByRef foundRoot)
+  foundRoot = ""
   On Error Resume Next
   Set request = CreateObject("MSXML2.ServerXMLHTTP.6.0")
   request.setTimeouts 300, 300, 500, 500
   request.Open "GET", healthAddress, False
   request.Send
 
-  If Err.Number = 0 And request.Status = 200 Then
+  If Err.Number <> 0 Then
+    CheckExistingInstance = "none"
+    Err.Clear
+    On Error GoTo 0
+    Exit Function
+  End If
+
+  If request.Status = 200 Then
     Dim body, runningRoot
     body = request.responseText
     runningRoot = ExtractJsonString(body, "project_root")
     If Len(runningRoot) > 0 Then
+      foundRoot = runningRoot
       If NormalizePath(runningRoot) = NormalizePath(expectedFolder) Then
         CheckExistingInstance = "same"
       Else

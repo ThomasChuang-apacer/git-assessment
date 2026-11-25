@@ -1193,3 +1193,81 @@ def test_waiting_state_duration_repair_count_and_quarantine_cleanup(assessment):
     service.delete_session(sid)
     assert not list((service.quarantine_root / "workspaces").glob(f"*{sid}*"))
 
+
+def test_idle_shutdown_monitor_respects_active_requests_and_triggers_when_idle():
+    import time
+    from run import IdleShutdownMonitor
+
+    triggered = threading.Event()
+    monitor = IdleShutdownMonitor(timeout_seconds=0.18, shutdown_callback=triggered.set)
+    monitor.request_started()
+    monitor.start()
+    try:
+        # While a request is in progress, idle shutdown must not fire
+        time.sleep(0.32)
+        assert not triggered.is_set()
+        assert monitor.triggered is False
+
+        # Once the request finishes, idle shutdown triggers after timeout
+        monitor.request_finished()
+        assert triggered.wait(timeout=1.5)
+        assert monitor.triggered is True
+    finally:
+        monitor.stop()
+
+    disabled_triggered = threading.Event()
+    disabled = IdleShutdownMonitor(timeout_seconds=0, shutdown_callback=disabled_triggered.set)
+    disabled.start()
+    time.sleep(0.1)
+    disabled.stop()
+    assert not disabled_triggered.is_set()
+
+
+def test_dynamic_port_fallback_and_saved_url_helpers(tmp_path: Path, monkeypatch):
+    import socket
+    from flask import Flask
+    import run as runner
+
+    monkeypatch.delenv("GIT_ASSESSMENT_PORT", raising=False)
+    monkeypatch.delenv("GIT_ASSESSMENT_IDLE_TIMEOUT_SECONDS", raising=False)
+    assert runner.resolve_port_config() == (runner.DEFAULT_PORT, False)
+    assert runner.resolve_idle_timeout() == runner.DEFAULT_IDLE_TIMEOUT_SECONDS
+
+    monkeypatch.setenv("GIT_ASSESSMENT_PORT", "8899")
+    monkeypatch.setenv("GIT_ASSESSMENT_IDLE_TIMEOUT_SECONDS", "0")
+    assert runner.resolve_port_config() == (8899, True)
+    assert runner.resolve_idle_timeout() == 0
+
+    # Saved URL round-trip and non-loopback rejection
+    runner.write_saved_server_url("http://127.0.0.1:8769", runtime_dir=tmp_path)
+    assert runner.read_saved_server_url(runtime_dir=tmp_path) == "http://127.0.0.1:8769"
+    (tmp_path / "server-url.txt").write_text("http://evil.example:8765", encoding="ascii")
+    assert runner.read_saved_server_url(runtime_dir=tmp_path) is None
+
+    # Occupy an ephemeral port even with SO_REUSEADDR (matching Werkzeug's HTTPServer)
+    blocker = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    blocker.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    blocker.bind(("127.0.0.1", 0))
+    blocker.listen(1)
+    busy_port = blocker.getsockname()[1]
+
+    dummy_app = Flask(__name__)
+    server = None
+    try:
+        assert runner.port_is_available(busy_port) is False
+        with pytest.raises(OSError):
+            runner.create_bound_server(dummy_app, preferred_port=busy_port, strict=True)
+
+        server, bound_port = runner.create_bound_server(
+            dummy_app,
+            preferred_port=busy_port,
+            strict=False,
+            max_port=busy_port + 10,
+        )
+        assert bound_port > busy_port
+        assert bound_port <= busy_port + 10
+    finally:
+        if server is not None:
+            server.server_close()
+        blocker.close()
+

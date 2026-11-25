@@ -14,9 +14,11 @@ $ProjectRoot = [System.IO.Path]::GetFullPath($ProjectRoot)
 $startBat = Join-Path $ProjectRoot "scripts\start.bat"
 $runtimeRoot = Join-Path $ProjectRoot "runtime"
 $statusPath = Join-Path $runtimeRoot "setup-status.txt"
+$urlPath = Join-Path $runtimeRoot "server-url.txt"
 $logPath = Join-Path $runtimeRoot "logs\git-assessment.log"
 [System.IO.Directory]::CreateDirectory($runtimeRoot) | Out-Null
 Remove-Item -LiteralPath $statusPath -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath $urlPath -Force -ErrorAction SilentlyContinue
 
 $isFirstStart = $Mode -eq "FirstStart"
 $form = New-Object System.Windows.Forms.Form
@@ -87,11 +89,8 @@ try {
     exit 1
 }
 
-$port = 8765
 $configuredPort = [Environment]::GetEnvironmentVariable("GIT_ASSESSMENT_PORT")
-if ($configuredPort -and [int]::TryParse($configuredPort, [ref]$port) -eq $false) {
-    $port = 8765
-}
+$portDesc = if ($configuredPort) { "連接埠 $configuredPort" } else { "連接埠 8765–8799" }
 
 $timer = New-Object System.Windows.Forms.Timer
 $timer.Interval = 250
@@ -114,7 +113,7 @@ $timer.Add_Tick({
         $timer.Stop()
         Remove-Item -LiteralPath $statusPath -Force -ErrorAction SilentlyContinue
         [System.Windows.Forms.MessageBox]::Show(
-            "Git Assessment 無法完成啟動。請確認 Python 3.11+、Git for Windows 或連接埠 $port 是否被占用。`r`n`r`n詳細紀錄：$logPath",
+            "Git Assessment 無法完成啟動。請確認 Python 3.11+、Git for Windows 或$portDesc 是否被占用。`r`n`r`n詳細紀錄：$logPath",
             "Git Assessment",
             "OK",
             "Error"
@@ -123,23 +122,34 @@ $timer.Add_Tick({
         return
     }
 
-    if ($phase -eq "start-server") {
-        $client = New-Object System.Net.Sockets.TcpClient
+    if ($phase -eq "start-server" -and (Test-Path -LiteralPath $urlPath)) {
+        $targetPort = $null
         try {
-            $connection = $client.ConnectAsync("127.0.0.1", $port)
-            if ($connection.Wait(100) -and $client.Connected) {
-                $timer.Stop()
-                $progress.Style = "Continuous"
-                $progress.Value = 100
-                $status.Text = "準備完成，正在開啟瀏覽器…"
-                Remove-Item -LiteralPath $statusPath -Force -ErrorAction SilentlyContinue
-                [System.Windows.Forms.Application]::DoEvents()
-                Start-Sleep -Milliseconds 600
-                $form.Close()
+            $savedUrl = [System.IO.File]::ReadAllText($urlPath).Trim()
+            if ($savedUrl -match '^http://127\.0\.0\.1:(\d+)$') {
+                $targetPort = [int]$Matches[1]
             }
         } catch {
-        } finally {
-            $client.Dispose()
+            $targetPort = $null
+        }
+        if ($targetPort) {
+            $client = New-Object System.Net.Sockets.TcpClient
+            try {
+                $connection = $client.ConnectAsync("127.0.0.1", $targetPort)
+                if ($connection.Wait(100) -and $client.Connected) {
+                    $timer.Stop()
+                    $progress.Style = "Continuous"
+                    $progress.Value = 100
+                    $status.Text = "準備完成，正在開啟瀏覽器…"
+                    Remove-Item -LiteralPath $statusPath -Force -ErrorAction SilentlyContinue
+                    [System.Windows.Forms.Application]::DoEvents()
+                    Start-Sleep -Milliseconds 600
+                    $form.Close()
+                }
+            } catch {
+            } finally {
+                $client.Dispose()
+            }
         }
     }
 })
