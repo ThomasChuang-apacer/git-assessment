@@ -58,7 +58,7 @@ def test_home_and_session_pages(assessment):
     assert "任務總覽" in overview.get_data(as_text=True)
     task = client.get(f"/assessment/{result['session_id']}/tasks/task01")
     assert task.status_code == 200
-    assert "提交指定的修改" in task.get_data(as_text=True)
+    assert "只提交修好的設定檔" in task.get_data(as_text=True)
     summary = client.get(f"/assessment/{result['session_id']}/result")
     assert summary.status_code == 200
     assert "測驗結果摘要" in summary.get_data(as_text=True)

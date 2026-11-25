@@ -4,9 +4,9 @@
     {
       "id": "task01",
       "order": 1,
-      "title": "提交指定的修改（只包含 src/config.py）",
-      "description": "這個 repository 目前同時有三種變更：需要提交的 src/config.py、尚未完成的 README.md，以及未追蹤的 debug.log。你的目標是只提交 src/config.py，其他兩個檔案都必須留在 working tree（工作目錄），不可進入 commit。",
-      "exam_goal": "只將 src/config.py 提交成一筆新 commit（Commit message 必須為 Fix configuration loading）；README.md 必須保持未暫存的修改狀態，debug.log 必須維持未追蹤檔案，兩者皆不可刪除、還原或進入 commit。",
+      "title": "只提交修好的設定檔，別把草稿和 log 混進去",
+      "description": "你剛修完設定檔載入問題（src/config.py），準備先把這筆修正提交出去。不過手邊的 README.md 才改到一半，剛剛除錯留下的 debug.log 也還在資料夾裡。請只提交 src/config.py，另外兩個檔案原封不動留在工作目錄即可。",
+      "exam_goal": "剛修好 src/config.py，請只提交這個檔案並建立一筆新 commit（Commit message 必須完全等於 Fix configuration loading）。改到一半的 README.md 需維持未暫存的修改狀態，除錯產生的 debug.log 需維持未追蹤狀態，兩者皆不可刪除、還原或包進 commit。",
       "instructions": [
         "先查看目前檔案狀態，分辨 src/config.py、README.md 與 debug.log 各自的狀態",
         "只將 src/config.py 加入 staging area（暫存區）；不要加入 README.md 或 debug.log",
@@ -33,9 +33,9 @@
     {
       "id": "task02",
       "order": 2,
-      "title": "將遺漏的測試補進最新 Commit",
-      "description": "目前最新的一筆 commit 已包含程式修改，但漏掉了 tests/test_config.py。請先把測試檔改成題目提供的內容，再更新原本的最新 commit；完成後仍然只能有原來那一筆 commit。",
-      "exam_goal": "將 tests/test_config.py 修改為題目提供的測試內容並併入目前的最新 commit（保留原本 Commit message：Fix configuration loading）。不可新增第二筆 commit，完成後 working tree 必須乾淨。",
+      "title": "發 PR 前發現漏了測試，補進剛剛那筆 Commit",
+      "description": "你剛提交了 Fix configuration loading，準備推上去發 PR 前才發現忘了把單元測試 tests/test_config.py 一起放進去。為了不要多一筆「補測試」的零碎紀錄，請把測試檔改好後直接併回剛剛那一筆 commit。",
+      "exam_goal": "剛提交的 Fix configuration loading 漏了單元測試。請將 tests/test_config.py 改為題目提供的測試內容，並直接更新併入目前最新的 commit（保留原本 Commit message：Fix configuration loading）。不可新增第二筆 commit，完成後 working tree 必須乾淨。",
       "instructions": [
         "將 tests/test_config.py 完整修改為下方提供的內容，讓測試確認 production config path",
         "把 tests/test_config.py 加入 staging area（暫存區）",
@@ -70,9 +70,9 @@
     {
       "id": "task03",
       "order": 3,
-      "title": "從 main 建立功能分支並提交",
-      "description": "目前位於 main。請從 main 建立並切換到 feature/login-timeout，在新分支修改登入逾時設定並提交。完成後必須留在功能分支，而 main 仍維持原本內容。",
-      "exam_goal": "從目前的 main 建立並切換至分支 feature/login-timeout，將 src/login.py 的 LOGIN_TIMEOUT 改為 60 並以訊息 Update login timeout 建立單一 commit。不可在 main 提交或移動 main。",
+      "title": "收到調整登入逾時的需求，開新分支開發",
+      "description": "使用者回報登入偶爾會逾時，你接手把 src/login.py 的 LOGIN_TIMEOUT 調高為 60。團隊規範不能直接在 main 開發提交，請先從 main 切出 feature/login-timeout 分支再修改並提交，讓 main 維持原本狀態。",
+      "exam_goal": "收到調整登入逾時的需求，請從目前的 main 建立並切換至 feature/login-timeout，將 src/login.py 的 LOGIN_TIMEOUT 改為 60，以訊息 Update login timeout 建立單一 commit。不可直接在 main 提交或移動 main。",
       "instructions": [
         "確認目前位於 main，再建立並切換到新分支 feature/login-timeout",
         "在 feature/login-timeout 上，將 src/login.py 的 LOGIN_TIMEOUT 從 30 改為 60",
@@ -97,9 +97,9 @@
     {
       "id": "task04",
       "order": 4,
-      "title": "Fetch 遠端更新並用 Rebase 解決 Conflict",
-      "description": "你目前在 feature/login-timeout，分支上已有自己的修改。另一位開發者會更新遠端 main，而且雙方都修改了 src/login.py。請先用題目按鈕建立遠端更新，再回到 Terminal 執行 fetch，最後把目前分支 rebase 到最新的 origin/main，並手動整合雙方需要保留的設定。",
-      "exam_goal": "點擊「模擬遠端 main 更新」產生遠端新 commit 後，在 Terminal 同步遠端 origin/main，並將 feature/login-timeout 以線性整合（不可 merge）方式套用到最新 origin/main；解決 src/login.py 衝突以同時保留 LOGIN_TIMEOUT = 60 與 LOGIN_RETRY = 5，且清除所有衝突標記與舊設定值。",
+      "title": "同事先合了 main 造成衝突，同步並線性整合",
+      "description": "你在 feature/login-timeout 改好登入逾時正要發 PR，這時同事剛好把重試次數的調整合進遠端 main，而且改到同一支 src/login.py。請先點按鈕模擬同事的遠端更新，再回 Terminal 同步最新遠端紀錄，以線性方式把目前分支接到最新的 origin/main 上並解決衝突。",
+      "exam_goal": "同事剛將重試設定更新合入遠端 main 且改到同一支 src/login.py。請先點擊「模擬遠端 main 更新」，再到 Terminal 同步 origin/main，將 feature/login-timeout 以線性方式整合到最新 origin/main（不可 merge）；解衝突時同時保留 LOGIN_TIMEOUT = 60 與 LOGIN_RETRY = 5，並清除所有衝突標記與舊設定值。",
       "instructions": [
         "確認目前位於 feature/login-timeout，而且 working tree 沒有尚未提交的修改",
         "在題目頁按下「模擬遠端 main 更新」，讓新 commit 只出現在模擬的遠端 main",
@@ -139,9 +139,9 @@
     {
       "id": "task05",
       "order": 5,
-      "title": "用 Stash 暫存修改並查看遠端分支",
-      "description": "你目前在 feature/login-timeout，notes/development.md 有一份不能提交但必須保留的草稿。遠端 origin 另有 hotfix/check-status（同樣異動了 notes/development.md），本機還看不到對應分支。請先用 stash 暫時收起草稿，再取得並切換到 hotfix/check-status 分支查看修正，最後回到原分支恢復草稿。",
-      "exam_goal": "在不提交草稿的前提下先妥善暫存 notes/development.md 的未提交修改，從 origin 取得並建立本機追蹤分支 hotfix/check-status 後實際切換過去查看，再回到 feature/login-timeout 恢復原本草稿且不留下任何暫存紀錄。",
+      "title": "寫到一半臨時支援看 Hotfix，看完回來接續",
+      "description": "你正在 feature/login-timeout 整理開發筆記（notes/development.md），還沒寫完不能 commit；這時同事推了緊急分支 hotfix/check-status 到 origin 請你幫忙看一眼（而且該分支也改了 notes/development.md）。請先把草稿收好，抓下並實際切過去查看，確認完再切回原分支繼續寫。",
+      "exam_goal": "notes/development.md 的草稿還沒寫完、不可提交，但同事請你幫忙確認遠端 origin 的 hotfix/check-status（該分支也異動了同一檔案）。請先妥善暫存草稿，從 origin 建立本機追蹤分支 hotfix/check-status 並實際切換過去查看，最後切回 feature/login-timeout 恢復草稿且不殘留任何暫存紀錄。",
       "instructions": [
         "先查看狀態，確認 notes/development.md 是未提交修改",
         "不要建立 commit；使用 stash 暫時保存目前修改，讓 working tree 可以安全切換分支",
@@ -172,9 +172,9 @@
     {
       "id": "task06",
       "order": 6,
-      "title": "Cherry-pick 指定的修正 Commit",
-      "description": "你目前位於 feature/login-timeout。另一個本機分支 fix/validation 上有多筆 commit，其中最新的一筆包含空字串驗證修正。請找出這筆 commit，並用 cherry-pick 只把它套用到目前分支；不要合併整個 fix/validation（也不應帶入其他不相關的檔案）。",
-      "exam_goal": "找出本機分支 fix/validation 上「Reject empty validation values」這筆修正 commit，只將它獨立套用到 feature/login-timeout（不可 merge、rebase 或帶入 notes/validator_todo.md），完成後 working tree 必須乾淨。",
+      "title": "只借用同事分支上的一筆修 Bug Commit",
+      "description": "開發 feature/login-timeout 時踩到空字串沒被擋掉的 bug，同事已經在另一條還沒完工的 fix/validation 分支上修好了，但那條分支前面還夾著其他開發筆記，不能整條合併過來。請找出那筆修驗證的 commit，單獨套用到目前分支即可。",
+      "exam_goal": "同事在尚未完工的本機分支 fix/validation 上已修好空字串驗證（訊息為 Reject empty validation values），但分支中還包含不相關的 notes/validator_todo.md。請只將該筆修正 commit 獨立套用到 feature/login-timeout（不可 merge、rebase 或帶入其他檔案），完成後 working tree 必須乾淨。",
       "instructions": [
         "確認目前位於 feature/login-timeout",
         "查看 fix/validation 的歷史紀錄（例如最新的一筆 commit），確認要套用的 SHA 與訊息",
