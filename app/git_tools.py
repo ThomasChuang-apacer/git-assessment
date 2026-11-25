@@ -26,12 +26,14 @@ class GitRunner:
         *args: str,
         check: bool = True,
         env: dict[str, str] | None = None,
+        input_text: str | None = None,
     ) -> GitResult:
         if not repo.exists():
             raise GitError("Repository 不存在")
         try:
             completed = subprocess.run(
                 ["git", "-C", str(repo), *args],
+                input=input_text,
                 capture_output=True,
                 text=True,
                 encoding="utf-8",

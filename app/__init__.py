@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 import secrets
 
-from flask import Flask
+from flask import Flask, session
 
 from .routes import bp
 from .security import install_local_request_protection
@@ -16,6 +17,9 @@ def create_app(test_config: dict | None = None) -> Flask:
     app.config.from_mapping(
         SECRET_KEY=secrets.token_hex(32),
         LOCAL_API_TOKEN=secrets.token_urlsafe(32),
+        EXAMINER_PIN=os.environ.get("GIT_ASSESSMENT_EXAMINER_PIN", "").strip(),
+        SESSION_COOKIE_HTTPONLY=True,
+        SESSION_COOKIE_SAMESITE="Lax",
         PROJECT_ROOT=project_root,
         QUESTIONS_PATH=project_root / "questions" / "questions.json",
         TEMPLATE_ROOT=project_root / "data" / "templates",
@@ -34,6 +38,16 @@ def create_app(test_config: dict | None = None) -> Flask:
     service.prepare()
     app.extensions["assessment_service"] = service
     install_local_request_protection(app)
-    app.context_processor(lambda: {"api_token": app.config["LOCAL_API_TOKEN"]})
+
+    @app.context_processor
+    def inject_globals():
+        pin = str(app.config.get("EXAMINER_PIN") or "").strip()
+        return {
+            "api_token": app.config["LOCAL_API_TOKEN"],
+            "instance_id": service.instance_id,
+            "examiner_required": bool(pin),
+            "examiner_unlocked": (not pin) or (session.get("examiner_unlocked") is True),
+        }
+
     app.register_blueprint(bp)
     return app

@@ -8,6 +8,14 @@ document.addEventListener("DOMContentLoaded", () => {
     window.setTimeout(() => { liveRegion.textContent = text; }, 50);
   };
 
+  const formatDateTime = (iso) => {
+    if (!iso) return "—";
+    const parsed = new Date(iso);
+    if (Number.isNaN(parsed.getTime())) return iso;
+    const pad = (value) => String(value).padStart(2, "0");
+    return `${parsed.getFullYear()}/${pad(parsed.getMonth() + 1)}/${pad(parsed.getDate())} ${pad(parsed.getHours())}:${pad(parsed.getMinutes())}:${pad(parsed.getSeconds())}`;
+  };
+
   const confirmDialog = document.getElementById("confirm-dialog");
   // Resolves true only when the confirm button is pressed.
   // With cancelLabel: null it acts as a single-button notice (replaces window.alert).
@@ -73,25 +81,56 @@ document.addEventListener("DOMContentLoaded", () => {
     button.addEventListener("click", async () => {
       const target = document.getElementById(button.dataset.copyTarget);
       if (!target) return;
+      const copyLabel = button.dataset.copyLabel || "內容";
       try {
         await navigator.clipboard.writeText(target.textContent.trim());
         const original = button.dataset.originalLabel || button.textContent;
         button.dataset.originalLabel = original;
         button.textContent = "已複製";
-        announce("已複製到剪貼簿");
+        announce(`已複製${copyLabel}到剪貼簿`);
         window.setTimeout(() => { button.textContent = original; }, 1400);
       } catch {
-        window.prompt("請複製以下路徑：", target.textContent.trim());
+        window.prompt(`請複製以下${copyLabel}：`, target.textContent.trim());
       }
     });
   });
 
-  const startForm = document.querySelector(".start-form");
-  startForm?.addEventListener("submit", () => {
+  const startForm = document.querySelector(".start-form[action$='/api/sessions']");
+  const nameInput = document.getElementById("candidate_name");
+  const nameError = document.getElementById("candidate-name-error");
+  nameInput?.addEventListener("input", () => {
+    if (nameError && !nameError.hidden && nameInput.value.trim()) {
+      nameError.hidden = true;
+      nameError.textContent = "";
+    }
+  });
+  startForm?.addEventListener("submit", (event) => {
+    if (nameInput) {
+      const trimmed = nameInput.value.trim();
+      if (!trimmed) {
+        event.preventDefault();
+        if (nameError) {
+          nameError.textContent = "請輸入姓名或識別代碼（不能只有空白字元）。";
+          nameError.hidden = false;
+        }
+        nameInput.focus();
+        return;
+      }
+      if (trimmed.length > 80) {
+        event.preventDefault();
+        if (nameError) {
+          nameError.textContent = "姓名或識別代碼不可超過 80 個字元。";
+          nameError.hidden = false;
+        }
+        nameInput.focus();
+        return;
+      }
+      nameInput.value = trimmed;
+    }
     const button = startForm.querySelector('button[type="submit"]');
     if (button) {
       button.disabled = true;
-      button.textContent = "正在建立測驗…";
+      button.textContent = "正在建立 6 題獨立 Git 環境，請稍候…";
     }
   });
 
@@ -147,7 +186,7 @@ document.addEventListener("DOMContentLoaded", () => {
       const completed = button.dataset.repairCompleted === "yes";
       const warning = completed
         ? "此題已完成。修復會先備份資料，但會清除完成狀態並重建題目。考官確認要繼續嗎？"
-        : "系統會先備份損壞資料，再重建本題。確定要繼續嗎？";
+        : "系統會先將損壞資料安全備份，再重建本題。確定要繼續嗎？";
       const confirmed = await askConfirm({
         title: "備份並修復這一題？",
         message: warning,
@@ -177,6 +216,77 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   });
 
+  const cleanupButton = document.getElementById("cleanup-quarantine");
+  const cleanupMessage = document.getElementById("cleanup-message");
+  cleanupButton?.addEventListener("click", async () => {
+    const confirmed = await askConfirm({
+      title: "清理隔離備份與舊版殘留檔？",
+      message: "會移除 runtime/quarantine/ 內容及舊版殘留的 git-exam.lock / debug/ 目錄；不會刪除現有有效測驗紀錄。",
+      confirmLabel: "確認清理",
+      danger: true,
+    });
+    if (!confirmed) return;
+    cleanupButton.disabled = true;
+    try {
+      const response = await fetch("/api/examiner/cleanup", {
+        method: "POST",
+        headers: {
+          "Accept": "application/json",
+          "Content-Type": "application/json",
+          "X-Git-Assessment-Token": apiToken,
+          "X-Git-Assessment-Request-ID": window.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`,
+        },
+        body: JSON.stringify({ include_quarantine: true, include_archive: false }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "清理失敗");
+      if (cleanupMessage) {
+        cleanupMessage.textContent = `已完成清理，共移除 ${payload.removed_items} 項殘留或隔離項目。`;
+        cleanupMessage.className = "inline-message success";
+      }
+      window.setTimeout(() => window.location.reload(), 900);
+    } catch (error) {
+      if (cleanupMessage) {
+        cleanupMessage.textContent = error.message || "清理失敗";
+        cleanupMessage.className = "inline-message error";
+      }
+      cleanupButton.disabled = false;
+    }
+  });
+
+  const copySummaryButton = document.getElementById("copy-result-text");
+  copySummaryButton?.addEventListener("click", async () => {
+    const dataElement = document.getElementById("result-summary-data");
+    const message = document.getElementById("result-download-message");
+    try {
+      const summary = JSON.parse(dataElement.textContent);
+      const lines = [
+        `【Git 實作測驗結果摘要】`,
+        `姓名：${summary.candidate_name}（${summary.mode_label}）`,
+        `完成題數：${summary.completed_count}/${summary.total}`,
+        `開始時間：${formatDateTime(summary.started_at)}`,
+        `完成時間：${formatDateTime(summary.completed_at)}`,
+        `總作答時間：${summary.duration_display}`,
+        `驗證碼：${summary.integrity_short}（${summary.integrity_ok ? "資料完整" : "驗證異常"}）`,
+        "",
+        ...summary.tasks.map((task) => {
+          const st = task.status === "completed" ? "已完成" : task.status === "in_progress" ? "進行中" : "尚未完成";
+          return `0${task.order} ${task.title}：${st}（檢查 ${task.check_attempts} 次、重設 ${task.reset_count} 次）`;
+        }),
+      ];
+      await navigator.clipboard.writeText(lines.join("\n"));
+      if (message) {
+        message.textContent = "文字結果摘要已複製到剪貼簿。";
+        message.className = "action-message success";
+      }
+    } catch (error) {
+      if (message) {
+        message.textContent = error.message || "無法複製文字摘要";
+        message.className = "action-message error";
+      }
+    }
+  });
+
   const resultButton = document.getElementById("download-result-png");
   resultButton?.addEventListener("click", () => {
     const dataElement = document.getElementById("result-summary-data");
@@ -185,7 +295,7 @@ document.addEventListener("DOMContentLoaded", () => {
       const summary = JSON.parse(dataElement.textContent);
       const width = 1200;
       const rowHeight = 112;
-      const height = 390 + summary.tasks.length * rowHeight;
+      const height = 430 + summary.tasks.length * rowHeight;
       const canvas = document.createElement("canvas");
       canvas.width = width;
       canvas.height = height;
@@ -195,18 +305,27 @@ document.addEventListener("DOMContentLoaded", () => {
       ctx.fillRect(0, 0, width, height);
       ctx.fillStyle = "#20252b";
       ctx.fillRect(0, 0, width, 26);
-      ctx.font = "700 24px 'Microsoft JhengHei', sans-serif";
+      ctx.font = "700 22px 'Microsoft JhengHei', sans-serif";
       ctx.fillStyle = "#075985";
-      ctx.fillText("GIT PRACTICAL ASSESSMENT", 70, 85);
-      ctx.font = "800 52px 'Microsoft JhengHei', sans-serif";
+      ctx.fillText(`GIT PRACTICAL ASSESSMENT · ${summary.mode_label}`, 70, 82);
+      ctx.font = "800 50px 'Microsoft JhengHei', sans-serif";
       ctx.fillStyle = "#20252b";
-      ctx.fillText("測驗結果摘要", 70, 150);
+      ctx.fillText("測驗結果摘要", 70, 146);
 
-      ctx.font = "700 34px 'Microsoft JhengHei', sans-serif";
-      ctx.fillText(summary.candidate_name, 70, 225);
-      ctx.font = "500 20px 'Microsoft JhengHei', sans-serif";
+      ctx.font = "700 32px 'Microsoft JhengHei', sans-serif";
+      ctx.fillText(summary.candidate_name, 70, 218, 790);
+      ctx.font = "500 18px 'Microsoft JhengHei', sans-serif";
       ctx.fillStyle = "#5b6570";
-      ctx.fillText(`開始時間：${summary.started_at}`, 70, 265);
+      ctx.fillText(
+        `開始時間：${formatDateTime(summary.started_at)}　完成時間：${formatDateTime(summary.completed_at)}`,
+        70,
+        256
+      );
+      ctx.fillText(
+        `總作答時間：${summary.duration_display}　重設總計：${summary.total_resets || 0} 次　提示使用：${summary.total_hints || 0} 次`,
+        70,
+        286
+      );
 
       ctx.fillStyle = "#0f2f46";
       ctx.fillRect(895, 80, 235, 170);
@@ -220,7 +339,7 @@ document.addEventListener("DOMContentLoaded", () => {
       ctx.textAlign = "left";
 
       summary.tasks.forEach((task, index) => {
-        const y = 320 + index * rowHeight;
+        const y = 340 + index * rowHeight;
         const completed = task.status === "completed";
         const inProgress = task.status === "in_progress";
         ctx.fillStyle = completed ? "#e9f6ee" : inProgress ? "#eef2f6" : "#ffffff";
@@ -228,12 +347,16 @@ document.addEventListener("DOMContentLoaded", () => {
         ctx.font = "800 24px 'Microsoft JhengHei', sans-serif";
         ctx.fillStyle = "#5b6570";
         ctx.fillText(String(task.order).padStart(2, "0"), 98, y + 52);
-        ctx.font = "700 25px 'Microsoft JhengHei', sans-serif";
+        ctx.font = "700 24px 'Microsoft JhengHei', sans-serif";
         ctx.fillStyle = "#20252b";
-        ctx.fillText(task.title, 170, y + 39);
+        ctx.fillText(task.title, 170, y + 38, 700);
         ctx.font = "500 17px 'Microsoft JhengHei', sans-serif";
         ctx.fillStyle = "#5b6570";
-        ctx.fillText(`檢查次數：${task.check_attempts}`, 170, y + 67);
+        const metaParts = [`檢查次數：${task.check_attempts}`, `重設次數：${task.reset_count || 0}`];
+        if (completed && task.duration_display && task.duration_display !== "—") {
+          metaParts.push(`耗時：${task.duration_display}`);
+        }
+        ctx.fillText(metaParts.join(" · "), 170, y + 66);
         ctx.textAlign = "right";
         ctx.font = "700 22px 'Microsoft JhengHei', sans-serif";
         ctx.fillStyle = completed ? "#237a49" : inProgress ? "#475569" : "#5b6570";
@@ -241,9 +364,13 @@ document.addEventListener("DOMContentLoaded", () => {
         ctx.textAlign = "left";
       });
 
-      ctx.font = "500 16px 'Microsoft JhengHei', sans-serif";
-      ctx.fillStyle = "#7b8782";
-      ctx.fillText(`Session: ${summary.session_id}`, 70, height - 32);
+      ctx.font = "500 15px 'Microsoft JhengHei', sans-serif";
+      ctx.fillStyle = "#5b6570";
+      ctx.fillText(
+        `Session: ${summary.session_id} · 驗證碼：${summary.integrity_short || "無"}（${summary.integrity_ok ? "資料完整" : "異常"}）`,
+        70,
+        height - 28
+      );
 
       canvas.toBlob((blob) => {
         if (!blob) {
@@ -272,7 +399,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const taskId = shell.dataset.taskId;
   const message = document.getElementById("action-message");
 
-  const post = async (action) => {
+  const post = async (action, jsonBody = null) => {
     const requestId = window.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
     const headers = {
       "Accept": "application/json",
@@ -280,10 +407,12 @@ document.addEventListener("DOMContentLoaded", () => {
       "X-Git-Assessment-Request-ID": requestId,
     };
     if (action === "reset") headers["X-Git-Assessment-Confirm"] = "reset";
-    const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/tasks/${encodeURIComponent(taskId)}/${action}`, {
-      method: "POST",
-      headers,
-    });
+    const options = { method: "POST", headers };
+    if (jsonBody !== null) {
+      headers["Content-Type"] = "application/json";
+      options.body = JSON.stringify(jsonBody);
+    }
+    const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/tasks/${encodeURIComponent(taskId)}/${action}`, options);
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.error || "操作失敗");
     return payload;
@@ -329,23 +458,41 @@ document.addEventListener("DOMContentLoaded", () => {
       renderChecks(result.checks);
       const passed = result.checks.filter((check) => check.passed).length;
       const summary = `${passed} / ${result.checks.length} 通過`;
-      document.getElementById("check-summary").textContent = summary;
-      document.getElementById("check-dock-summary").textContent = summary;
+      const summaryEl = document.getElementById("check-summary");
+      const dockSummaryEl = document.getElementById("check-dock-summary");
+      const attemptEl = document.getElementById("attempt-count");
+      if (summaryEl) summaryEl.textContent = summary;
+      if (dockSummaryEl) dockSummaryEl.textContent = summary;
+      if (attemptEl && typeof result.check_attempts === "number") {
+        attemptEl.textContent = result.check_attempts;
+      }
       document.getElementById("completed-count").textContent = result.completed_count;
       document.getElementById("task-status-title").textContent = result.completed ? "任務已完成" : "還有項目未完成";
-      document.getElementById("task-checkmark").classList.toggle("is-complete", result.completed);
-      if (nextStepLink) nextStepLink.hidden = !result.completed;
+      const checkmark = document.getElementById("task-checkmark");
+      if (checkmark) {
+        checkmark.classList.toggle("is-complete", result.completed);
+        checkmark.classList.toggle("is-failed", !result.completed);
+        checkmark.textContent = result.completed ? "✓" : "!";
+      }
+      if (nextStepLink) {
+        nextStepLink.hidden = !result.completed;
+        if (result.all_completed && nextStepLink.dataset.resultHref) {
+          nextStepLink.href = nextStepLink.dataset.resultHref;
+          nextStepLink.textContent = "查看／保存結果 →";
+        } else if (nextStepLink.dataset.nextHref) {
+          nextStepLink.href = nextStepLink.dataset.nextHref;
+          nextStepLink.textContent = nextStepLink.dataset.nextLabel || "前往下一題 →";
+        }
+      }
       mainCheckButton?.classList.toggle("button-primary", !result.completed);
       mainCheckButton?.classList.toggle("button-secondary", result.completed);
       if (mainCheckButton) labels.set(mainCheckButton, result.completed ? "重新檢查" : "檢查結果");
       let text = result.completed
         ? "完成狀態已保存。"
-        : `還有 ${result.checks.length - passed} 項未通過，請看紅色項目的說明後再試一次。`;
-      if (result.all_completed) text = "全部任務都完成了！返回總覽查看結果。";
+        : `還有 ${result.checks.length - passed} 項未通過，請依紅色項目的說明修正後再試。`;
+      if (result.all_completed) text = "全部任務都完成了！可點擊「查看／保存結果」下載成績單。";
       setInlineMessage(message, text, result.completed ? "success" : "notice");
 
-      // Bring the outcome into view: the first failed condition, or the panel itself
-      // when the check was started from the narrow-screen dock.
       const firstFailed = document.querySelector("#check-list .check-item.failed");
       if (firstFailed || trigger !== mainCheckButton) {
         (firstFailed || checkPanel)?.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -372,11 +519,37 @@ document.addEventListener("DOMContentLoaded", () => {
     }, { threshold: 0.15 }).observe(checkPanel);
   }
 
+  document.querySelectorAll(".hint-toggle").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const idx = Number(button.dataset.hintIndex);
+      const body = document.getElementById(`hint-body-${idx}`);
+      if (!body) return;
+      const isExpanded = button.getAttribute("aria-expanded") === "true";
+      if (isExpanded) {
+        body.hidden = true;
+        button.setAttribute("aria-expanded", "false");
+        return;
+      }
+      body.hidden = false;
+      button.setAttribute("aria-expanded", "true");
+      button.textContent = `提示 ${idx + 1}（已檢視）`;
+      try {
+        const outcome = await post("hint", { hint_index: idx });
+        const counter = document.getElementById("hints-used-count");
+        if (counter && typeof outcome.hints_used === "number") {
+          counter.textContent = outcome.hints_used;
+        }
+      } catch {
+        // Keep the hint visible locally even if tracking fails transiently.
+      }
+    });
+  });
+
   document.getElementById("reset-task")?.addEventListener("click", async (event) => {
     const button = event.currentTarget;
     const confirmed = await askConfirm({
       title: "重設本題？",
-      message: "會清除本題的所有 Git 操作與檔案修改，回到題目剛建立時的狀態。這個動作無法復原。",
+      message: "會清除本題的所有 Git 操作與檔案修改，回到題目剛建立時的狀態（歷史檢查與重設次數會保留於結果紀錄）。",
       confirmLabel: "重設本題",
       danger: true,
     });
@@ -399,8 +572,8 @@ document.addEventListener("DOMContentLoaded", () => {
     try {
       const result = await post("remote-update");
       setInlineMessage(remoteMessage, result.updated
-        ? "遠端 main 已更新。提示：遠端資料更新後，要先 fetch 最新資訊，再觀察 origin/main 的變化。"
-        : "遠端 main 已經是最新模擬狀態。請先取得最新遠端資訊，再處理分支整合。", "success");
+        ? "遠端 main 已更新。提示：遠端資料更新後，要先執行 git fetch origin，再觀察 origin/main 的變化。"
+        : "遠端 main 已經是最新模擬狀態。請先執行 git fetch origin，再處理分支整合。", "success");
       button.textContent = "遠端更新已建立";
     } catch (error) {
       setInlineMessage(remoteMessage, error.message, "error");

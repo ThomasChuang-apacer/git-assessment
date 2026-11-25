@@ -530,3 +530,352 @@ def test_runtime_records_survive_copy_from_legacy_absolute_path(tmp_path: Path):
     task04 = moved_service.task_repo(migrated, "task04")
     origin_url = git(task04, "remote", "get-url", "origin").stdout.strip()
     assert Path(origin_url).resolve() == moved_workspace / ".origins" / "task04.git"
+
+
+def test_task05_new_session_has_no_compatibility_warning(assessment):
+    app, service, result = assessment
+    compat = service.task_compatibility(result, "task05")
+    assert compat["compatible"] is True
+    assert compat["message"] == ""
+    page = app.test_client().get(f"/assessment/{result['session_id']}/tasks/task05").get_data(as_text=True)
+    assert "需要套用新版題目" not in page
+
+
+def test_task01_rejects_initial_no_commit_and_readme_tampering(assessment):
+    _, service, result = assessment
+    session_id = result["session_id"]
+    repo = service.task_repo(result, "task01")
+
+    initial = service.check_task(session_id, "task01")
+    initial_checks = {item["check_id"]: item["passed"] for item in initial["checks"]}
+    assert initial_checks["config-in-commit"] is False
+
+    git(repo, "add", "README.md")
+    staged = service.check_task(session_id, "task01")
+    staged_checks = {item["check_id"]: item["passed"] for item in staged["checks"]}
+    assert staged_checks["readme-modified"] is False
+
+    git(repo, "restore", "--staged", "README.md")
+    git(repo, "add", "src/config.py", "README.md")
+    git(repo, "commit", "-m", "Fix configuration loading")
+    committed = service.check_task(session_id, "task01")
+    committed_checks = {item["check_id"]: item["passed"] for item in committed["checks"]}
+    assert committed["completed"] is False
+    assert committed_checks["readme-not-commit"] is False
+
+
+def test_task04_rejects_unfetched_bypass_and_conflict_markers(assessment):
+    _, service, result = assessment
+    session_id = result["session_id"]
+    repo = service.task_repo(result, "task04")
+
+    # Bypass without simulate_remote_update, fetch, or rebase
+    (repo / "src/login.py").write_text("LOGIN_TIMEOUT = 60\nLOGIN_RETRY = 5\n", encoding="utf-8")
+    git(repo, "add", "src/login.py")
+    git(repo, "commit", "-m", "Fake retry edit")
+    bypass = service.check_task(session_id, "task04")
+    bypass_checks = {item["check_id"]: item["passed"] for item in bypass["checks"]}
+    assert bypass["completed"] is False
+    assert bypass_checks["remote-fetched"] is False
+    assert bypass_checks["main-ancestor"] is False
+    assert bypass_checks["used-rebase"] is False
+
+    # Reset and try committing unresolved conflict markers
+    service.reset_task(session_id, "task04")
+    repo = service.task_repo(service.get_session(session_id), "task04")
+    service.simulate_remote_update(session_id, "task04")
+    git(repo, "fetch", "origin")
+    rebase = git(repo, "rebase", "origin/main", check=False)
+    assert rebase.returncode != 0
+    git(repo, "add", "src/login.py")
+    git(repo, "-c", "core.editor=true", "rebase", "--continue")
+
+    markers = service.check_task(session_id, "task04")
+    marker_checks = {item["check_id"]: item["passed"] for item in markers["checks"]}
+    assert markers["completed"] is False
+    assert marker_checks["no-conflict-markers"] is False
+    assert marker_checks["no-stale-values"] is False
+
+
+def test_tampered_tags_and_main_do_not_bypass_server_baseline(assessment):
+    _, service, result = assessment
+    session_id = result["session_id"]
+
+    repo1 = service.task_repo(result, "task01")
+    git(repo1, "commit", "--allow-empty", "-m", "Extra commit")
+    git(repo1, "add", "src/config.py")
+    git(repo1, "commit", "-m", "Fix configuration loading")
+    git(repo1, "tag", "-f", "assessment-start", "HEAD~1")
+    t1 = service.check_task(session_id, "task01")
+    t1_checks = {item["check_id"]: item["passed"] for item in t1["checks"]}
+    assert t1["completed"] is False
+    assert t1_checks["single-commit"] is False
+
+    repo3 = service.task_repo(result, "task03")
+    git(repo3, "switch", "-c", "feature/login-timeout")
+    git(repo3, "commit", "--allow-empty", "-m", "Extra commit")
+    git(repo3, "branch", "-f", "main", "HEAD")
+    (repo3 / "src/login.py").write_text("LOGIN_TIMEOUT = 60\n\ndef login():\n    return LOGIN_TIMEOUT\n", encoding="utf-8")
+    git(repo3, "add", "src/login.py")
+    git(repo3, "commit", "-m", "Update login timeout")
+    t3 = service.check_task(session_id, "task03")
+    t3_checks = {item["check_id"]: item["passed"] for item in t3["checks"]}
+    assert t3["completed"] is False
+    assert t3_checks["main-unchanged"] is False
+
+
+def test_task02_and_task06_enforce_process_checks(assessment):
+    _, service, result = assessment
+    session_id = result["session_id"]
+
+    # Task 02: reset --soft + new commit instead of amend should fail used-amend
+    repo2 = service.task_repo(result, "task02")
+    (repo2 / "tests/test_config.py").write_text(
+        'from src.config import CONFIG_PATH\n\n\ndef test_config_path():\n    assert CONFIG_PATH == "config/production.json"\n',
+        encoding="utf-8",
+    )
+    git(repo2, "reset", "--soft", "HEAD~1")
+    git(repo2, "add", "tests/test_config.py")
+    git(repo2, "commit", "-m", "Fix configuration loading")
+    t2 = service.check_task(session_id, "task02")
+    t2_checks = {item["check_id"]: item["passed"] for item in t2["checks"]}
+    assert t2["completed"] is False
+    assert t2_checks["used-amend"] is False
+
+    # Task 06: manual copy + commit (not cherry-pick) fails used-cherry-pick; merge brings unrelated file
+    repo6 = service.task_repo(result, "task06")
+    (repo6 / "src/validator.py").write_text(
+        'def is_valid(value):\n    return value is not None and value.strip() != ""\n',
+        encoding="utf-8",
+    )
+    git(repo6, "add", "src/validator.py")
+    git(repo6, "commit", "-m", "Reject empty validation values")
+    t6_manual = service.check_task(session_id, "task06")
+    t6_manual_checks = {item["check_id"]: item["passed"] for item in t6_manual["checks"]}
+    assert t6_manual["completed"] is False
+    assert t6_manual_checks["used-cherry-pick"] is False
+
+    service.reset_task(session_id, "task06")
+    repo6 = service.task_repo(service.get_session(session_id), "task06")
+    git(repo6, "merge", "fix/validation")
+    t6_merge = service.check_task(session_id, "task06")
+    t6_merge_checks = {item["check_id"]: item["passed"] for item in t6_merge["checks"]}
+    assert t6_merge["completed"] is False
+    assert t6_merge_checks["no-unrelated-file"] is False
+    assert t6_merge_checks["not-merged"] is False
+
+
+def test_task05_requires_tracking_and_allows_intermediate_branch(assessment):
+    _, service, result = assessment
+    session_id = result["session_id"]
+    repo = service.task_repo(result, "task05")
+
+    git(repo, "stash", "push", "-m", "wip")
+    git(repo, "fetch", "origin")
+    git(repo, "checkout", "-b", "hotfix/check-status", "--no-track", "origin/hotfix/check-status")
+    git(repo, "switch", "main")
+    git(repo, "switch", "feature/login-timeout")
+    git(repo, "stash", "pop")
+
+    no_track = service.check_task(session_id, "task05")
+    no_track_checks = {item["check_id"]: item["passed"] for item in no_track["checks"]}
+    assert no_track["completed"] is False
+    assert no_track_checks["hotfix-branch"] is False
+    assert no_track_checks["switched-back"] is True
+
+    git(repo, "branch", "--set-upstream-to=origin/hotfix/check-status", "hotfix/check-status")
+    with_track = service.check_task(session_id, "task05")
+    assert with_track["completed"] is True
+
+
+def test_reset_preserves_attempts_and_completed_at_is_not_overwritten(assessment):
+    _, service, result = assessment
+    session_id = result["session_id"]
+
+    service.check_task(session_id, "task01")
+    service.reset_task(session_id, "task01")
+    after_reset = service.task_state(service.get_session(session_id), "task01")
+    assert after_reset["check_attempts"] == 1
+    assert after_reset["reset_count"] == 1
+    assert after_reset["status"] == "not_started"
+
+    repo = service.task_repo(service.get_session(session_id), "task01")
+    git(repo, "add", "src/config.py")
+    git(repo, "commit", "-m", "Fix configuration loading")
+    first_pass = service.check_task(session_id, "task01")
+    assert first_pass["completed"] is True
+    first_done = service.task_state(first_pass["session"], "task01")["completed_at"]
+    assert first_done is not None
+
+    # Force a slightly different timestamp check via second pass
+    second_pass = service.check_task(session_id, "task01")
+    second_state = service.task_state(second_pass["session"], "task01")
+    assert second_state["completed_at"] == first_done
+    assert second_state["check_attempts"] == 3
+
+
+def test_api_status_codes_json_creation_and_host_protection(assessment):
+    app, service, result = assessment
+    client = app.test_client()
+    token = app.config["LOCAL_API_TOKEN"]
+
+    # Health includes instance identity
+    health = client.get("/api/health").get_json()
+    assert health["instance_id"] == service.instance_id
+    assert health["project_root"] == str(service.project_root)
+
+    # Host header check applies to GET as well
+    assert client.get("/", headers={"Host": "evil.example.com"}).status_code == 403
+    assert client.get("/api/health", headers={"Host": "evil.example.com"}).status_code == 403
+
+    # Missing resources return 404 (not 400) and Chinese JSON errors
+    missing_session = client.get("/api/sessions/does-not-exist/result", headers={"Accept": "application/json"})
+    assert missing_session.status_code == 404
+    assert "找不到" in missing_session.get_json()["error"]
+
+    missing_task = client.post(
+        f"/api/sessions/{result['session_id']}/tasks/task99/check",
+        headers={"X-Git-Assessment-Token": token, "Accept": "application/json"},
+    )
+    assert missing_task.status_code == 404
+
+    unknown_api = client.get("/api/nonexistent", headers={"Accept": "application/json"})
+    assert unknown_api.status_code == 404
+    assert "找不到" in unknown_api.get_json()["error"]
+
+    bad_method = client.delete(
+        "/api/health",
+        headers={"X-Git-Assessment-Token": token, "Accept": "application/json"},
+    )
+    assert bad_method.status_code == 405
+    assert "不支援" in bad_method.get_json()["error"]
+
+    # Backend enforces 80-char candidate_name limit
+    too_long = client.post(
+        "/api/sessions",
+        data={"_api_token": token, "_confirm": "create", "candidate_name": "A" * 81},
+        headers={"Accept": "application/json"},
+    )
+    assert too_long.status_code == 400
+
+    # JSON create returns 201 JSON with redirect_url
+    created = client.post(
+        "/api/sessions",
+        data={"_api_token": token, "_confirm": "create", "candidate_name": "Json Candidate"},
+        headers={"Accept": "application/json"},
+    )
+    assert created.status_code == 201
+    payload = created.get_json()
+    assert payload["session_id"]
+    assert payload["redirect_url"].endswith(payload["session_id"])
+
+
+def test_exam_mode_hints_integrity_and_examiner_pin_privacy(tmp_path: Path):
+    app = create_app(
+        {
+            "TESTING": True,
+            "SECRET_KEY": "test-secret",
+            "EXAMINER_PIN": "2468",
+            "TEMPLATE_ROOT": PROJECT_ROOT / "data" / "templates",
+            "DATA_ROOT": tmp_path / "runtime",
+            "QUESTIONS_PATH": PROJECT_ROOT / "questions" / "questions.json",
+        }
+    )
+    service = app.extensions["assessment_service"]
+    token = app.config["LOCAL_API_TOKEN"]
+    client = app.test_client()
+
+    # Create exam session via POST form (sets active-session cookie on this client)
+    created = client.post(
+        "/api/sessions",
+        data={"_api_token": token, "_confirm": "create", "candidate_name": "Exam User", "mode": "exam"},
+        headers={"Accept": "application/json"},
+    )
+    assert created.status_code == 201
+    sid = created.get_json()["session_id"]
+
+    # Task page in exam mode shows exam_goal instead of step-by-step instructions
+    task_html = client.get(f"/assessment/{sid}/tasks/task01").get_data(as_text=True)
+    assert "任務目標" in task_html
+    assert "先查看目前檔案狀態" not in task_html
+
+    # Hint viewing records unique hint views
+    h1 = client.post(
+        f"/api/sessions/{sid}/tasks/task01/hint",
+        json={"hint_index": 0},
+        headers={"X-Git-Assessment-Token": token, "X-Git-Assessment-Request-ID": "hint-req-0001"},
+    )
+    assert h1.status_code == 200
+    assert h1.get_json()["hints_used"] == 1
+    h1_dup = client.post(
+        f"/api/sessions/{sid}/tasks/task01/hint",
+        json={"hint_index": 0},
+        headers={"X-Git-Assessment-Token": token, "X-Git-Assessment-Request-ID": "hint-req-0002"},
+    )
+    assert h1_dup.get_json()["hints_used"] == 1
+
+    # Integrity hash detects manual JSON tampering
+    raw = service.get_session(sid)
+    assert service.verify_result_integrity(raw) is True
+    raw_tampered = dict(raw)
+    raw_tampered["candidate_name"] = "Tampered Name"
+    assert service.verify_result_integrity(raw_tampered) is False
+
+    # Another browser without cookie cannot see Exam User on Home when PIN is set
+    anon_client = app.test_client()
+    anon_home = anon_client.get("/").get_data(as_text=True)
+    assert "Exam User" not in anon_home
+    assert "共用考場隱私保護" in anon_home
+
+    # Protected examiner endpoints return 403 while locked
+    assert anon_client.get(f"/api/sessions/{sid}/result", headers={"Accept": "application/json"}).status_code == 403
+    assert (
+        anon_client.post(
+            f"/api/sessions/{sid}/delete",
+            headers={"X-Git-Assessment-Token": token, "X-Git-Assessment-Confirm": "delete-session"},
+        ).status_code
+        == 403
+    )
+
+    # Wrong PIN rejected; valid PIN unlocks examiner console and cleanup
+    assert (
+        anon_client.post(
+            "/api/examiner/unlock",
+            json={"pin": "0000"},
+            headers={"X-Git-Assessment-Token": token, "Accept": "application/json"},
+        ).status_code
+        == 403
+    )
+    assert (
+        anon_client.post(
+            "/api/examiner/unlock",
+            json={"pin": "2468"},
+            headers={"X-Git-Assessment-Token": token, "Accept": "application/json"},
+        ).status_code
+        == 200
+    )
+    assert anon_client.get(f"/api/sessions/{sid}/result").status_code == 200
+    assert "Exam User" in anon_client.get("/examiner").get_data(as_text=True)
+
+    # Legacy lock + quarantine cleanup via examiner API
+    (service.data_root / "git-exam.lock").write_text("old", encoding="utf-8")
+    (service.quarantine_root / "results").mkdir(parents=True, exist_ok=True)
+    (service.quarantine_root / "results" / "stale.json").write_text("{}", encoding="utf-8")
+    cleanup = anon_client.post(
+        "/api/examiner/cleanup",
+        json={"include_quarantine": True, "include_archive": False},
+        headers={"X-Git-Assessment-Token": token},
+    )
+    assert cleanup.status_code == 200
+    assert cleanup.get_json()["removed_items"] >= 2
+    assert not (service.data_root / "git-exam.lock").exists()
+
+
+def test_ansi_stripping_log_formatter():
+    import logging
+    from run import AnsiStrippingFormatter
+
+    formatter = AnsiStrippingFormatter("%(message)s")
+    record = logging.LogRecord("test", logging.INFO, "", 0, '\x1b[31m\x1b[1m"GET / HTTP/1.1" 404\x1b[0m', (), None)
+    assert formatter.format(record) == '"GET / HTTP/1.1" 404'
+

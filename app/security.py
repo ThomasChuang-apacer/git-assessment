@@ -9,16 +9,16 @@ LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}
 
 
 def install_local_request_protection(app: Flask) -> None:
-    """Reject state-changing requests that did not originate from this app."""
+    """Reject non-local requests and state-changing calls missing the local token."""
 
     @app.before_request
     def protect_local_api():
-        if request.method not in {"POST", "PUT", "PATCH", "DELETE"}:
-            return None
-
         host = (urlparse(f"//{request.host}").hostname or "").lower()
         if host not in LOCAL_HOSTS:
             abort(403, description="只允許從本機存取")
+
+        if request.method not in {"POST", "PUT", "PATCH", "DELETE"}:
+            return None
 
         origin = request.headers.get("Origin")
         if origin:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hmac
 import json
 import hashlib
 import logging
@@ -24,12 +25,28 @@ def now_iso() -> str:
     return datetime.now().astimezone().isoformat(timespec="seconds")
 
 
+def format_duration(seconds: int | None) -> str:
+    if seconds is None:
+        return "尚未完成"
+    seconds = max(0, int(seconds))
+    hours, rem = divmod(seconds, 3600)
+    minutes, secs = divmod(rem, 60)
+    if hours > 0:
+        return f"{hours} 小時 {minutes} 分 {secs} 秒"
+    if minutes > 0:
+        return f"{minutes} 分 {secs} 秒"
+    return f"{secs} 秒"
+
+
 class AssessmentService:
     SESSION_PATTERN = re.compile(r"^[A-Za-z0-9._-]+$")
     SCHEMA_VERSION = 3
+    VALID_MODES = {"practice", "exam"}
 
     def __init__(self, questions_path: Path, template_root: Path, data_root: Path, git_timeout: int = 5):
         self.questions_path = questions_path
+        self.project_root = self.questions_path.resolve().parent.parent
+        self.instance_id = hashlib.sha256(str(self.project_root).casefold().encode("utf-8")).hexdigest()[:12]
         self.template_root = template_root
         self.data_root = data_root
         self.workspace_root = data_root / "workspaces"
@@ -85,10 +102,14 @@ class AssessmentService:
                 self._request_cache.pop(next(iter(self._request_cache)))
             return json.loads(json.dumps(outcome, ensure_ascii=False))
 
-    def create_session(self, candidate_name: str) -> dict:
+    def create_session(self, candidate_name: str, mode: str = "practice") -> dict:
         display_name = candidate_name.strip()
         if not display_name:
             raise ValueError("請輸入姓名或識別代碼")
+        if len(display_name) > 80:
+            raise ValueError("姓名或識別代碼不可超過 80 個字元")
+        if mode not in self.VALID_MODES:
+            raise ValueError("不支援的測驗模式")
         candidate_id = self._candidate_id(display_name)
         stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
         session_id = f"{stamp}-{uuid.uuid4().hex[:6]}"
@@ -107,22 +128,77 @@ class AssessmentService:
                     "candidate_id": candidate_id,
                     "candidate_key": self._candidate_key(display_name),
                     "candidate_name": display_name,
+                    "mode": mode,
                     "slot": "current",
                     "workspace": self._workspace_reference(candidate_id, "current"),
                     "started_at": now_iso(),
                     "completed_at": None,
+                    "integrity_hash": "",
                     "tasks": [
-                        {"task_id": q["id"], "status": "not_started", "completed_at": None,
-                         "check_attempts": 0, "last_checks": []}
+                        {
+                            "task_id": q["id"],
+                            "status": "not_started",
+                            "first_opened_at": None,
+                            "completed_at": None,
+                            "check_attempts": 0,
+                            "reset_count": 0,
+                            "hints_used": 0,
+                            "viewed_hints": [],
+                            "last_checks": [],
+                            "baseline": self._capture_task_baseline(stage, q["id"]),
+                        }
                         for q in self.questions
                     ],
-                    "events": [{"type": "session_started", "timestamp": now_iso()}],
+                    "events": [{"type": "session_started", "mode": mode, "timestamp": now_iso()}],
                 }
                 self._install_staged_session(candidate_id, stage, result)
                 return result
             finally:
                 if stage.exists():
                     shutil.rmtree(stage, onerror=self._remove_readonly)
+
+    def _capture_task_baseline(self, workspace: Path, task_id: str) -> dict[str, str]:
+        direct_repo = workspace / task_id
+        repo = direct_repo if (direct_repo / ".git").exists() else direct_repo / "repo"
+        if not (repo / ".git").exists():
+            return {}
+        baseline: dict[str, str] = {}
+        for key, ref in (
+            ("assessment_start", "refs/tags/assessment-start"),
+            ("initial_head", "HEAD"),
+            ("main", "refs/heads/main"),
+        ):
+            res = self.git.run(repo, "rev-parse", "--verify", ref, check=False)
+            if res.returncode == 0 and res.stdout:
+                baseline[key] = res.stdout.strip()
+        if task_id == "task04":
+            orig_main = self.git.run(repo, "rev-parse", "--verify", "refs/remotes/origin/main", check=False)
+            if orig_main.returncode == 0 and orig_main.stdout:
+                baseline["initial_origin_main"] = orig_main.stdout.strip()
+            origin = workspace / ".origins" / "task04.git"
+            if origin.is_dir():
+                pending = self.git.run(origin, "rev-parse", "--verify", "refs/assessment/pending-main", check=False)
+                if pending.returncode == 0 and pending.stdout:
+                    baseline["remote_pending_main"] = pending.stdout.strip()
+        elif task_id == "task05":
+            origin = workspace / ".origins" / "task05.git"
+            if origin.is_dir():
+                hotfix = self.git.run(origin, "rev-parse", "--verify", "refs/heads/hotfix/check-status", check=False)
+                if hotfix.returncode == 0 and hotfix.stdout:
+                    baseline["remote_hotfix"] = hotfix.stdout.strip()
+        elif task_id == "task06":
+            fix_res = self.git.run(repo, "rev-parse", "--verify", "refs/heads/fix/validation", check=False)
+            if fix_res.returncode == 0 and fix_res.stdout:
+                fix_sha = fix_res.stdout.strip()
+                baseline["fix_validation"] = fix_sha
+                diff_res = self.git.run(repo, "diff-tree", "-p", fix_sha, check=False)
+                if diff_res.returncode == 0 and diff_res.stdout:
+                    pid_res = self.git.run(
+                        repo, "patch-id", "--stable", check=False, input_text=diff_res.stdout + "\n"
+                    )
+                    if pid_res.returncode == 0 and pid_res.stdout:
+                        baseline["fix_validation_patch_id"] = pid_res.stdout.split()[0]
+        return baseline
 
     def get_session(self, session_id: str) -> dict:
         self._validate_session_id(session_id)
@@ -149,6 +225,7 @@ class AssessmentService:
                     {
                         "session_id": result["session_id"],
                         "candidate_name": result.get("candidate_name", result.get("candidate_id", "Unknown")),
+                        "mode": result.get("mode", "practice"),
                         "started_at": result.get("started_at", ""),
                         "last_activity_at": last_activity,
                         "completed_at": result.get("completed_at"),
@@ -157,6 +234,7 @@ class AssessmentService:
                         "available": workspace.exists() and workspace.is_dir(),
                         "healthy": health["healthy"],
                         "health_issues": health["issues"],
+                        "integrity_ok": self.verify_result_integrity(result),
                     }
                 )
             except (OSError, ValueError, KeyError, json.JSONDecodeError):
@@ -226,9 +304,15 @@ class AssessmentService:
         with self._locked(f"session:{session_id}"):
             result = self.get_session(session_id)
             task = self.task_state(result, task_id)
+            changed = False
+            if not task.get("first_opened_at"):
+                task["first_opened_at"] = now_iso()
+                changed = True
             if task["status"] == "not_started":
                 task["status"] = "in_progress"
                 result["events"].append({"type": "task_opened", "task_id": task_id, "timestamp": now_iso()})
+                changed = True
+            if changed:
                 self._save_result(result)
             return result
 
@@ -238,13 +322,21 @@ class AssessmentService:
             question = self.get_question(task_id)
             task = self.task_state(result, task_id)
             repo = self.task_repo(result, task_id)
-            checks = self.checker.run_all(repo, question["checks"])
+            remote_updated = (
+                self.remote_update_status(result, task_id).get("remote_updated", False)
+                if task_id == "task04"
+                else False
+            )
+            context = {"mode": result.get("mode", "practice"), "remote_updated": remote_updated}
+            checks = self.checker.run_all(
+                repo, question["checks"], baseline=task.get("baseline") or {}, context=context
+            )
             completed = all(item["passed"] for item in checks if item["required"])
 
             task["check_attempts"] += 1
             task["last_checks"] = checks
             task["status"] = "completed" if completed else "in_progress"
-            task["completed_at"] = now_iso() if completed else None
+            task["completed_at"] = (task.get("completed_at") or now_iso()) if completed else None
             result["events"].append(
                 {"type": "task_checked", "task_id": task_id, "passed": completed, "timestamp": now_iso()}
             )
@@ -268,11 +360,41 @@ class AssessmentService:
             self._reset_task_atomically(question, workspace, task_dir, origin_dir)
 
             task = self.task_state(result, task_id)
-            task.update(status="not_started", completed_at=None, check_attempts=0, last_checks=[])
+            task.update(
+                status="not_started",
+                first_opened_at=None,
+                completed_at=None,
+                reset_count=task.get("reset_count", 0) + 1,
+                last_checks=[],
+                baseline=self._capture_task_baseline(workspace, task_id),
+            )
             result["completed_at"] = None
             result["events"].append({"type": "task_reset", "task_id": task_id, "timestamp": now_iso()})
             self._save_result(result)
             return result
+
+    def record_hint_viewed(self, session_id: str, task_id: str, hint_index: int) -> dict:
+        with self._locked(f"task:{session_id}:{task_id}"), self._locked(f"session:{session_id}"):
+            result = self.get_session(session_id)
+            question = self.get_question(task_id)
+            task = self.task_state(result, task_id)
+            hints = question.get("hints", [])
+            if not isinstance(hint_index, int) or hint_index < 0 or hint_index >= len(hints):
+                raise ValueError("找不到指定的提示項目")
+            viewed = task.setdefault("viewed_hints", [])
+            if hint_index not in viewed:
+                viewed.append(hint_index)
+                task["hints_used"] = len(viewed)
+                result["events"].append(
+                    {
+                        "type": "hint_viewed",
+                        "task_id": task_id,
+                        "hint_index": hint_index,
+                        "timestamp": now_iso(),
+                    }
+                )
+                self._save_result(result)
+            return {"hints_used": task.get("hints_used", 0), "viewed_hints": viewed}
 
     def simulate_remote_update(self, session_id: str, task_id: str) -> dict:
         if task_id != "task04":
@@ -335,7 +457,11 @@ class AssessmentService:
             origin, "rev-parse", "--verify", "refs/heads/hotfix/check-status", check=False
         )
         version = self.git.run(repo, "config", "--get", "assessment.templateVersion", check=False)
-        compatible = remote.returncode == 0 and version.returncode == 0 and version.stdout == "5"
+        try:
+            template_ver = int(version.stdout) if version.returncode == 0 else 0
+        except ValueError:
+            template_ver = 0
+        compatible = remote.returncode == 0 and template_ver >= TemplateBuilder.TASK05_MIN_VERSION
         return {
             "compatible": compatible,
             "message": "此測驗建立於舊版第五題。請使用「重設本題」套用遠端限定分支情境。" if not compatible else "",
@@ -599,7 +725,13 @@ class AssessmentService:
                 issue_count += 1
         leftovers = list(self.workspace_root.rglob(".reset-stage-*")) + list(self.workspace_root.rglob(".transaction-*.json"))
         issue_count += len(leftovers)
-        return {"healthy": issue_count == 0, "issue_count": issue_count, "sessions": sessions}
+        return {
+            "healthy": issue_count == 0,
+            "issue_count": issue_count,
+            "sessions": sessions,
+            "instance_id": self.instance_id,
+            "project_root": str(self.project_root),
+        }
 
     def session_task_health(self, result: dict) -> dict[str, dict]:
         workspace = self._safe_existing_workspace(result)
@@ -618,7 +750,14 @@ class AssessmentService:
             workspace = self._safe_existing_workspace(result)
             question = self.get_question(task_id)
             self._repair_corrupt_task(workspace, question)
-            task.update(status="not_started", completed_at=None, check_attempts=0, last_checks=[])
+            task.update(
+                status="not_started",
+                first_opened_at=None,
+                completed_at=None,
+                reset_count=task.get("reset_count", 0) + 1,
+                last_checks=[],
+                baseline=self._capture_task_baseline(workspace, task_id),
+            )
             result["completed_at"] = None
             result["events"].append({"type": "task_repaired", "task_id": task_id, "timestamp": now_iso()})
             self._save_result(result)
@@ -674,7 +813,13 @@ class AssessmentService:
                     if ok or task["status"] == "completed":
                         continue
                     self._repair_corrupt_task(workspace, question)
-                    task.update(status="not_started", completed_at=None, check_attempts=0, last_checks=[])
+                    task.update(
+                        status="not_started",
+                        first_opened_at=None,
+                        completed_at=None,
+                        last_checks=[],
+                        baseline=self._capture_task_baseline(workspace, question["id"]),
+                    )
                     result["events"].append({
                         "type": "task_auto_repaired", "task_id": question["id"],
                         "reason": message, "timestamp": now_iso(),
@@ -771,7 +916,18 @@ class AssessmentService:
         # Absolute paths from schema v2 and earlier are deliberately ignored:
         # a copied package must never continue reading the original folder.
         result["workspace"] = self._workspace_reference(candidate_id, slot)
+        if result.get("mode") not in self.VALID_MODES:
+            result["mode"] = "practice"
+        result.setdefault("integrity_hash", "")
         result.setdefault("events", [])
+        if isinstance(result.get("tasks"), list):
+            for task in result["tasks"]:
+                if isinstance(task, dict):
+                    task.setdefault("first_opened_at", None)
+                    task.setdefault("reset_count", 0)
+                    task.setdefault("hints_used", 0)
+                    task.setdefault("viewed_hints", [])
+                    task.setdefault("baseline", {})
         return result
 
     def _validate_result(self, result: dict) -> dict:
@@ -785,6 +941,9 @@ class AssessmentService:
             raise ValueError("考生 ID 無效")
         if result.get("slot") not in {"current", "previous"}:
             raise ValueError("結果 slot 無效")
+        if result.get("mode") not in self.VALID_MODES:
+            result["mode"] = "practice"
+        result.setdefault("integrity_hash", "")
         workspace = Path(result["workspace"])
         expected_workspace = Path("workspaces") / result["candidate_id"] / result["slot"]
         if (
@@ -806,6 +965,11 @@ class AssessmentService:
             actual_ids.add(task_id)
             if not isinstance(task.get("check_attempts"), int) or not isinstance(task.get("last_checks"), list):
                 raise ValueError("題目檢查資料格式錯誤")
+            task.setdefault("first_opened_at", None)
+            task.setdefault("reset_count", 0)
+            task.setdefault("hints_used", 0)
+            task.setdefault("viewed_hints", [])
+            task.setdefault("baseline", {})
         if actual_ids != expected_ids:
             raise ValueError("結果題目數量不完整")
         return result
@@ -846,11 +1010,13 @@ class AssessmentService:
 
     def _validate_questions(self) -> None:
         supported = {
-            "current_branch", "branch_exists", "commit_message", "commit_count", "file_contains",
-            "file_at_revision_contains", "file_at_revision_not_contains", "file_in_commit", "file_not_in_commit",
-            "working_tree_modified", "working_tree_clean", "untracked_file", "stash_count",
-            "no_operation_in_progress", "is_ancestor", "not_is_ancestor", "no_merge_commit",
-            "reflog_contains",
+            "current_branch", "branch_exists", "branch_tracks_remote", "commit_message", "commit_count",
+            "file_contains", "file_equals", "file_matches", "file_not_contains", "file_not_exists",
+            "no_conflict_markers", "file_at_revision_contains", "file_at_revision_not_contains",
+            "file_in_commit", "file_not_in_commit", "working_tree_modified", "working_tree_clean",
+            "untracked_file", "stash_count", "no_operation_in_progress", "is_ancestor",
+            "not_is_ancestor", "no_merge_commit", "ref_equals", "reflog_contains",
+            "reflog_contains_action", "patch_equivalent",
         }
         ids = [q["id"] for q in self.questions]
         orders = [q["order"] for q in self.questions]
@@ -867,8 +1033,171 @@ class AssessmentService:
                     if file_path.is_absolute() or ".." in file_path.parts:
                         raise RuntimeError(f"不安全的題目檔案路徑：{check['file']}")
 
+    @staticmethod
+    def compute_result_hash(result: dict) -> str:
+        payload = {key: value for key, value in result.items() if key != "integrity_hash"}
+        canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+    @classmethod
+    def verify_result_integrity(cls, result: dict) -> bool:
+        recorded = result.get("integrity_hash") or ""
+        if not recorded:
+            return False
+        return hmac.compare_digest(cls.compute_result_hash(result), recorded)
+
+    @staticmethod
+    def _parse_iso(value: str | None) -> datetime | None:
+        if not value:
+            return None
+        try:
+            return datetime.fromisoformat(value)
+        except ValueError:
+            return None
+
+    def build_result_summary(self, result: dict) -> dict:
+        states = {item["task_id"]: item for item in result["tasks"]}
+        start_dt = self._parse_iso(result.get("started_at"))
+        end_dt = self._parse_iso(result.get("completed_at"))
+        total_seconds = (
+            max(0, int((end_dt - start_dt).total_seconds()))
+            if start_dt and end_dt
+            else None
+        )
+        tasks = []
+        for question in self.questions:
+            state = states[question["id"]]
+            opened_dt = self._parse_iso(state.get("first_opened_at"))
+            done_dt = self._parse_iso(state.get("completed_at"))
+            task_seconds = (
+                max(0, int((done_dt - opened_dt).total_seconds()))
+                if opened_dt and done_dt
+                else None
+            )
+            tasks.append(
+                {
+                    "task_id": question["id"],
+                    "order": question["order"],
+                    "title": question["title"],
+                    "status": state["status"],
+                    "check_attempts": state["check_attempts"],
+                    "reset_count": state.get("reset_count", 0),
+                    "hints_used": state.get("hints_used", 0),
+                    "first_opened_at": state.get("first_opened_at"),
+                    "completed_at": state.get("completed_at"),
+                    "duration_seconds": task_seconds,
+                    "duration_display": format_duration(task_seconds) if state["status"] == "completed" else "—",
+                }
+            )
+        event_labels = {
+            "session_started": "建立測驗",
+            "task_opened": "開啟題目",
+            "task_checked": "檢查結果",
+            "task_reset": "重設題目",
+            "task_repaired": "手動修復",
+            "task_auto_repaired": "自動修復",
+            "hint_viewed": "檢視提示",
+            "remote_update_simulated": "模擬遠端更新",
+        }
+        timeline = []
+        for event in result.get("events", []):
+            etype = event.get("type", "")
+            detail = event_labels.get(etype, etype)
+            if event.get("task_id"):
+                detail = f"{event['task_id']} · {detail}"
+            if etype == "task_checked":
+                detail += "（通過）" if event.get("passed") else "（未通過）"
+            elif etype == "hint_viewed":
+                detail += f"（第 {int(event.get('hint_index', 0)) + 1} 條）"
+            timeline.append({"timestamp": event.get("timestamp", ""), "label": detail})
+        integrity_hash = result.get("integrity_hash") or ""
+        return {
+            "candidate_name": result["candidate_name"],
+            "session_id": result["session_id"],
+            "mode": result.get("mode", "practice"),
+            "mode_label": "考試模式" if result.get("mode") == "exam" else "練習模式",
+            "started_at": result["started_at"],
+            "completed_at": result["completed_at"],
+            "duration_seconds": total_seconds,
+            "duration_display": format_duration(total_seconds),
+            "completed_count": sum(1 for item in tasks if item["status"] == "completed"),
+            "total": len(tasks),
+            "total_resets": sum(item["reset_count"] for item in tasks),
+            "total_hints": sum(item["hints_used"] for item in tasks),
+            "integrity_hash": integrity_hash,
+            "integrity_short": integrity_hash[:12] if integrity_hash else "無",
+            "integrity_ok": self.verify_result_integrity(result),
+            "tasks": tasks,
+            "events": timeline,
+        }
+
+    def cleanup_runtime(self, include_quarantine: bool = True, include_archive: bool = False) -> dict:
+        removed = 0
+        legacy_lock = self.data_root / "git-exam.lock"
+        if legacy_lock.is_file():
+            legacy_lock.unlink(missing_ok=True)
+            removed += 1
+        legacy_debug = self.data_root / "debug"
+        if legacy_debug.is_dir():
+            shutil.rmtree(legacy_debug, onerror=self._remove_readonly)
+            removed += 1
+
+        def clear_dir_children(root: Path) -> int:
+            count = 0
+            if not root.exists():
+                return 0
+            for child in list(root.iterdir()):
+                if child.is_dir() and child.name in {"results", "workspaces"}:
+                    for sub in list(child.iterdir()):
+                        if sub.is_dir():
+                            shutil.rmtree(sub, onerror=self._remove_readonly)
+                        else:
+                            sub.unlink(missing_ok=True)
+                        count += 1
+                else:
+                    if child.is_dir():
+                        shutil.rmtree(child, onerror=self._remove_readonly)
+                    else:
+                        child.unlink(missing_ok=True)
+                    count += 1
+            return count
+
+        if include_quarantine:
+            removed += clear_dir_children(self.quarantine_root)
+        if include_archive:
+            removed += clear_dir_children(self.archive_root)
+        return {
+            "removed_items": removed,
+            "quarantine_cleared": include_quarantine,
+            "archive_cleared": include_archive,
+        }
+
+    def runtime_storage_stats(self) -> dict:
+        def count_entries(root: Path) -> int:
+            if not root.exists():
+                return 0
+            total = 0
+            for child in root.iterdir():
+                if child.is_dir() and child.name in {"results", "workspaces"}:
+                    total += sum(1 for _ in child.iterdir())
+                else:
+                    total += 1
+            return total
+
+        legacy_items = []
+        if (self.data_root / "git-exam.lock").is_file():
+            legacy_items.append("git-exam.lock")
+        if (self.data_root / "debug").is_dir():
+            legacy_items.append("debug/")
+        return {
+            "quarantine_count": count_entries(self.quarantine_root),
+            "archive_count": count_entries(self.archive_root),
+            "legacy_items": legacy_items,
+        }
+
     def _save_result(self, result: dict) -> None:
         self._validate_result(result)
+        result["integrity_hash"] = self.compute_result_hash(result)
         path = self.result_root / f"{result['session_id']}.json"
         temp = path.with_suffix(f".{uuid.uuid4().hex}.tmp")
         temp.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")

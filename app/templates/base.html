@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light">
   <meta name="git-assessment-token" content="{{ api_token }}">
+  <meta name="git-assessment-instance" content="{{ instance_id }}">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230369a1'/%3E%3Ctext x='50%25' y='53%25' dominant-baseline='middle' text-anchor='middle' font-family='Consolas,monospace' font-size='38' font-weight='800' fill='white'%3EG%3C/text%3E%3C/svg%3E">
   <title>{% block title %}Git 實作測驗{% endblock %}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
 </head>
@@ -17,7 +19,8 @@
     </a>
     <div class="header-actions">
       {% block header_action %}{% endblock %}
-      <button class="shutdown-button" type="button" id="shutdown-app" aria-label="安全關閉 Git Assessment">
+      <a class="header-link header-examiner" href="{{ url_for('main.examiner_dashboard') }}">考官模式</a>
+      <button class="shutdown-button" type="button" id="shutdown-app" aria-label="安全關閉 Git Assessment" title="停止本機伺服器（所有測驗進度會自動保存，不會遺失）">
         <span class="shutdown-dot" aria-hidden="true"></span>
         <span class="shutdown-label-full">安全關閉 Git Assessment</span>
         <span class="shutdown-label-short" aria-hidden="true">安全關閉</span>
@@ -31,7 +34,7 @@
     <div class="shutdown-card">
       <span class="shutdown-check" aria-hidden="true">✓</span>
       <p class="eyebrow">SAFE SHUTDOWN</p>
-      <h1>關閉 Git Assessment</h1>
+      <h1>已安全關閉 Git Assessment</h1>
       <p>測驗進度已保存，現在可以關閉此頁。</p>
     </div>
   </section>
