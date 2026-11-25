@@ -6,7 +6,7 @@ import logging
 import threading
 import time
 
-from flask import Blueprint, abort, current_app, jsonify, make_response, redirect, render_template, request, session, url_for
+from flask import Blueprint, abort, current_app, g, jsonify, make_response, redirect, render_template, request, session, url_for
 from werkzeug.exceptions import HTTPException
 
 
@@ -14,12 +14,15 @@ bp = Blueprint("main", __name__)
 logger = logging.getLogger("git_assessment.routes")
 
 ACTIVE_SESSION_COOKIE = "git_assessment_active_session"
+EXAMINER_MAX_FAILURES = 5
+EXAMINER_LOCKOUT_SECONDS = 60
 
 HTTP_ERROR_MESSAGES = {
     400: "要求內容不正確，請回到上一頁再試一次。",
     403: "這個操作沒有通過安全驗證，請重新整理頁面後再試一次。",
     404: "找不到這個頁面。網址可能打錯了，或這份測驗紀錄已被刪除。",
     405: "這個網址不支援目前的操作方式，請從頁面上的按鈕操作。",
+    429: "嘗試次數過多，請稍後再試。",
     500: "程式發生未預期的錯誤，請重新整理頁面；若持續發生，請聯絡考官。",
 }
 
@@ -36,19 +39,65 @@ def examiner_required() -> bool:
     return bool(examiner_pin())
 
 
+def verify_examiner_pin(supplied: str) -> tuple[bool, bool, int]:
+    """Verify an examiner PIN with lockout protection. Returns (ok, locked, retry_after_sec)."""
+    pin = examiner_pin()
+    if not pin:
+        return True, False, 0
+    lock = current_app.extensions["examiner_auth_lock"]
+    state = current_app.extensions["examiner_auth_state"]
+    with lock:
+        now = time.monotonic()
+        if now < state["locked_until"]:
+            retry_after = max(1, int(state["locked_until"] - now) + 1)
+            return False, True, retry_after
+        if hmac.compare_digest(supplied, pin):
+            state["failures"] = 0
+            state["locked_until"] = 0.0
+            return True, False, 0
+        state["failures"] += 1
+        if state["failures"] >= EXAMINER_MAX_FAILURES:
+            state["locked_until"] = now + EXAMINER_LOCKOUT_SECONDS
+            return False, True, EXAMINER_LOCKOUT_SECONDS
+        return False, False, 0
+
+
+def _header_examiner_status() -> tuple[bool, bool, int]:
+    if hasattr(g, "_examiner_header_status"):
+        return g._examiner_header_status
+    supplied = request.headers.get("X-Git-Assessment-Examiner-PIN", "").strip()
+    if not supplied:
+        status = (False, False, 0)
+    else:
+        status = verify_examiner_pin(supplied)
+    g._examiner_header_status = status
+    return status
+
+
 def examiner_unlocked() -> bool:
     pin = examiner_pin()
     if not pin:
         return True
     if session.get("examiner_unlocked") is True:
         return True
-    supplied = request.headers.get("X-Git-Assessment-Examiner-PIN", "").strip()
-    return bool(supplied) and hmac.compare_digest(supplied, pin)
+    ok, _, _ = _header_examiner_status()
+    return ok
 
 
 def require_examiner() -> None:
-    if not examiner_unlocked():
-        abort(403, description="此操作僅限考官模式使用，請先驗證考官 PIN 碼")
+    if examiner_unlocked():
+        return
+    _, locked, retry_after = _header_examiner_status()
+    if locked:
+        abort(429, description=f"PIN 碼嘗試次數過多，請 {retry_after} 秒後再試。")
+    abort(403, description="此操作僅限考官模式使用，請先驗證考官 PIN 碼")
+
+
+def require_session_access(session_id: str) -> None:
+    if not examiner_required() or examiner_unlocked():
+        return
+    if request.cookies.get(ACTIVE_SESSION_COOKIE) != session_id:
+        abort(403, description="無法存取其他受測者的測驗紀錄")
 
 
 def session_context(session_id: str) -> tuple[dict, dict[str, dict]]:
@@ -196,6 +245,7 @@ def delete_session(session_id: str):
 
 @bp.get("/assessment/<session_id>")
 def overview(session_id: str):
+    require_session_access(session_id)
     result, states = session_context(session_id)
     completed = sum(1 for item in result["tasks"] if item["status"] == "completed")
     return render_template(
@@ -210,6 +260,7 @@ def overview(session_id: str):
 
 @bp.get("/assessment/<session_id>/tasks/<task_id>")
 def task(session_id: str, task_id: str):
+    require_session_access(session_id)
     result = service().mark_opened(session_id, task_id)
     question = service().get_question(task_id)
     state = service().task_state(result, task_id)
@@ -233,6 +284,7 @@ def task(session_id: str, task_id: str):
 
 @bp.post("/api/sessions/<session_id>/tasks/<task_id>/check")
 def check_task(session_id: str, task_id: str):
+    require_session_access(session_id)
     outcome = service().idempotent(
         f"check:{session_id}:{task_id}", request.headers.get("X-Git-Assessment-Request-ID"),
         lambda: service().check_task(session_id, task_id),
@@ -253,6 +305,7 @@ def check_task(session_id: str, task_id: str):
 
 @bp.post("/api/sessions/<session_id>/tasks/<task_id>/hint")
 def view_hint(session_id: str, task_id: str):
+    require_session_access(session_id)
     payload = request.get_json(silent=True) if request.is_json else None
     raw_index = (
         payload.get("hint_index")
@@ -273,6 +326,7 @@ def view_hint(session_id: str, task_id: str):
 
 @bp.post("/api/sessions/<session_id>/tasks/<task_id>/reset")
 def reset_task(session_id: str, task_id: str):
+    require_session_access(session_id)
     if request.headers.get("X-Git-Assessment-Confirm") != "reset":
         abort(400, description="缺少重設確認")
     service().idempotent(
@@ -284,6 +338,7 @@ def reset_task(session_id: str, task_id: str):
 
 @bp.post("/api/sessions/<session_id>/tasks/<task_id>/open")
 def open_task(session_id: str, task_id: str):
+    require_session_access(session_id)
     service().idempotent(
         f"open:{session_id}:{task_id}", request.headers.get("X-Git-Assessment-Request-ID"),
         lambda: service().open_task_folder(session_id, task_id),
@@ -293,6 +348,7 @@ def open_task(session_id: str, task_id: str):
 
 @bp.post("/api/sessions/<session_id>/tasks/<task_id>/remote-update")
 def simulate_remote_update(session_id: str, task_id: str):
+    require_session_access(session_id)
     outcome = service().idempotent(
         f"remote-update:{session_id}:{task_id}", request.headers.get("X-Git-Assessment-Request-ID"),
         lambda: service().simulate_remote_update(session_id, task_id),
@@ -321,6 +377,7 @@ def get_result(session_id: str):
 
 @bp.get("/assessment/<session_id>/result")
 def result_summary(session_id: str):
+    require_session_access(session_id)
     result = service().get_session(session_id)
     summary = service().build_result_summary(result)
     return render_template("result.html", result=result, summary=summary)
@@ -329,6 +386,7 @@ def result_summary(session_id: str):
 @bp.get("/examiner")
 def examiner_dashboard():
     unlocked = examiner_unlocked()
+    error_message = session.pop("examiner_error", None)
     sessions_data = []
     if unlocked:
         for item in service().list_sessions(limit=50):
@@ -342,33 +400,39 @@ def examiner_dashboard():
         "examiner.html",
         unlocked=unlocked,
         pin_required=examiner_required(),
+        error_message=error_message,
         sessions=sessions_data,
-        storage=service().runtime_storage_stats(),
-        health=service().runtime_health(),
+        storage=service().runtime_storage_stats() if unlocked else None,
+        health=service().runtime_health() if unlocked else None,
     )
 
 
 @bp.post("/api/examiner/unlock")
 def unlock_examiner():
     pin = examiner_pin()
+    if not pin:
+        if wants_json_response():
+            return jsonify({"error": "目前未設定考官 PIN 碼，不需解鎖"}), 400
+        return redirect(url_for("main.examiner_dashboard"))
     payload = request.get_json(silent=True) if request.is_json else None
     supplied = (
         str(payload.get("pin", ""))
         if isinstance(payload, dict) and "pin" in payload
         else request.form.get("pin", "")
     ).strip()
-    if pin and not hmac.compare_digest(supplied, pin):
+    ok, locked, retry_after = verify_examiner_pin(supplied)
+    if locked:
+        message = f"PIN 碼嘗試次數過多，請 {retry_after} 秒後再試。"
+        if wants_json_response():
+            return jsonify({"error": message, "retry_after": retry_after}), 429
+        session["examiner_error"] = message
+        return redirect(url_for("main.examiner_dashboard"))
+    if not ok:
         if wants_json_response():
             return jsonify({"error": "考官 PIN 碼錯誤"}), 403
-        return render_template(
-            "examiner.html",
-            unlocked=False,
-            pin_required=True,
-            error_message="考官 PIN 碼錯誤，請再試一次。",
-            sessions=[],
-            storage=service().runtime_storage_stats(),
-            health=service().runtime_health(),
-        ), 403
+        session["examiner_error"] = "考官 PIN 碼錯誤，請再試一次。"
+        return redirect(url_for("main.examiner_dashboard"))
+    session.pop("examiner_error", None)
     session["examiner_unlocked"] = True
     if wants_json_response():
         return jsonify({"ok": True})
@@ -398,7 +462,7 @@ def cleanup_examiner_storage():
 
 @bp.get("/api/health")
 def get_health():
-    return jsonify(service().runtime_health())
+    return jsonify(service().runtime_health(include_sessions=False))
 
 
 @bp.post("/api/shutdown")

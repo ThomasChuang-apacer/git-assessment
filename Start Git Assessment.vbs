@@ -16,7 +16,7 @@ If instanceState = "same" Then
   End If
   WScript.Quit 0
 ElseIf instanceState = "other" Then
-  MsgBox "連接埠 " & port & " 已被另一個目錄的 Git Assessment 占用。" & vbCrLf & vbCrLf & "請先關閉執行中的 Git Assessment，或設定不同的 GIT_ASSESSMENT_PORT 後再啟動。", vbExclamation, "Git Assessment"
+  MsgBox "Port " & port & " is already in use by another Git Assessment folder." & vbCrLf & vbCrLf & "Please close the running Git Assessment first, or set a different GIT_ASSESSMENT_PORT before starting.", vbExclamation, "Git Assessment"
   WScript.Quit 3
 End If
 

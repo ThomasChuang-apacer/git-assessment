@@ -26,7 +26,7 @@
           <small>開始時間：{{ summary.started_at | format_dt }}</small>
           {% if summary.completed_at %}<small>完成時間：{{ summary.completed_at | format_dt }}</small>{% endif %}
           <small>總作答時間：{{ summary.duration_display }}</small>
-          <small>驗證碼：<code>{{ summary.integrity_short }}</code>（{{ '✓ 資料完整' if summary.integrity_ok else '⚠ 驗證異常' }}）</small>
+          <small>校驗碼：<code>{{ summary.integrity_short }}</code>（{{ '檔案一致' if summary.integrity_ok else '檔案異動' }}）</small>
         </div>
       </div>
       <div class="result-score">
@@ -44,6 +44,7 @@
           <small>
             檢查次數：{{ task.check_attempts }}
             · 重設次數：{{ task.reset_count }}
+            {% if task.repair_count %} · 修復：{{ task.repair_count }} 次{% endif %}
             {% if task.hints_used %} · 提示：{{ task.hints_used }} 次{% endif %}
             {% if task.status == 'completed' %} · 耗時：{{ task.duration_display }}{% endif %}
           </small>

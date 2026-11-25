@@ -1,14 +1,30 @@
 from __future__ import annotations
 
+import json
+import logging
 import os
 from pathlib import Path
 import secrets
+import threading
 
 from flask import Flask, session
 
 from .routes import bp
 from .security import install_local_request_protection
 from .services import AssessmentService
+
+
+def _load_examiner_pin_from_file(data_root: Path) -> str:
+    config_path = data_root / "examiner.json"
+    if not config_path.is_file():
+        return ""
+    try:
+        payload = json.loads(config_path.read_text(encoding="utf-8"))
+        if isinstance(payload, dict) and isinstance(payload.get("pin"), str):
+            return payload["pin"].strip()
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        logging.getLogger("git_assessment.app").warning("無法讀取考官設定檔 %s：%s", config_path, exc)
+    return ""
 
 
 def create_app(test_config: dict | None = None) -> Flask:
@@ -29,6 +45,9 @@ def create_app(test_config: dict | None = None) -> Flask:
     if test_config:
         app.config.update(test_config)
 
+    if (not test_config or "EXAMINER_PIN" not in test_config) and not str(app.config.get("EXAMINER_PIN") or "").strip():
+        app.config["EXAMINER_PIN"] = _load_examiner_pin_from_file(Path(app.config["DATA_ROOT"]))
+
     service = AssessmentService(
         questions_path=Path(app.config["QUESTIONS_PATH"]),
         template_root=Path(app.config["TEMPLATE_ROOT"]),
@@ -37,6 +56,8 @@ def create_app(test_config: dict | None = None) -> Flask:
     )
     service.prepare()
     app.extensions["assessment_service"] = service
+    app.extensions["examiner_auth_lock"] = threading.Lock()
+    app.extensions["examiner_auth_state"] = {"failures": 0, "locked_until": 0.0}
     install_local_request_protection(app)
 
     @app.context_processor

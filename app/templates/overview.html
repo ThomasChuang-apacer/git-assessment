@@ -73,7 +73,12 @@
     <div class="task-card-footer">
       <span>
         {% if state.last_checks %}
-          上次檢查：{{ state.last_checks | selectattr('passed') | list | length }} / {{ state.last_checks | length }} 項通過
+          {% set cns = namespace(passed=0) %}
+          {% for c in state.last_checks %}
+            {% set dstate = c.display_state if c.display_state is defined else ('passed' if c.passed else 'failed') %}
+            {% if dstate == 'passed' %}{% set cns.passed = cns.passed + 1 %}{% endif %}
+          {% endfor %}
+          上次檢查：{{ cns.passed }} / {{ state.last_checks | length }} 項通過
         {% else %}
           {{ question.checks|length }} 項完成條件・尚未檢查
         {% endif %}

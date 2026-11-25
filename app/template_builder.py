@@ -9,7 +9,7 @@ from pathlib import Path
 
 
 class TemplateBuilder:
-    VERSION = 8
+    VERSION = 9
     TASK05_MIN_VERSION = 5
     _validation_cache: dict[tuple[str, bool], tuple[int, tuple[bool, str]]] = {}
 
@@ -104,8 +104,17 @@ class TemplateBuilder:
                 task05_repo, "show-ref", "--verify", "refs/remotes/origin/hotfix/check-status"
             )
             task05_version = self._git(task05_repo, "config", "--get", "assessment.templateVersion")
-            if not remote_hotfix or local_hotfix.returncode == 0 or tracked_hotfix.returncode == 0 or task05_version != str(self.VERSION):
-                return False, "task05 假遠端分支不應在本機預先存在"
+            task05_hotfix_notes = self._git(task05_origin, "show", "refs/heads/hotfix/check-status:notes/development.md")
+            task05_reflog = self._git_result(task05_repo, "reflog", "--format=%gs").stdout.strip()
+            if (
+                not remote_hotfix
+                or local_hotfix.returncode == 0
+                or tracked_hotfix.returncode == 0
+                or task05_version != str(self.VERSION)
+                or "Hotfix: verified status endpoint health." not in task05_hotfix_notes
+                or task05_reflog != ""
+            ):
+                return False, "task05 假遠端分支設定或初始 reflog 不正確"
         except (OSError, ValueError, RuntimeError, json.JSONDecodeError) as exc:
             return False, str(exc)
         outcome = (True, "6 個任務已通過完整性檢查" if deep else "6 個任務已通過快速啟動檢查")
@@ -137,9 +146,13 @@ class TemplateBuilder:
         repo.mkdir(parents=True)
         self._git(repo, "init", "-b", "main")
         self._git(repo, "config", "core.longpaths", "true")
+        self._git(repo, "config", "core.autocrlf", "false")
         self._git(repo, "config", "user.name", "Git Assessment")
         self._git(repo, "config", "user.email", "git-assessment@example.invalid")
         return repo
+
+    def _clear_reflogs(self, repo: Path) -> None:
+        self._git(repo, "reflog", "expire", "--expire-unreachable=now", "--expire=now", "--all")
 
     @staticmethod
     def _write(repo: Path, relative: str, content: str) -> None:
@@ -157,6 +170,7 @@ class TemplateBuilder:
         self._write(repo, "README.md", "# Demo Service\n\nBasic project documentation.\n")
         self._commit_all(repo, "Initial project")
         self._git(repo, "tag", "assessment-start")
+        self._clear_reflogs(repo)
         self._write(repo, "src/config.py", 'CONFIG_PATH = "config/production.json"\n')
         self._write(repo, "README.md", "# Demo Service\n\nBasic project documentation.\n\nTODO: finish deployment notes.\n")
         self._write(repo, "debug.log", "temporary debug output\n")
@@ -173,12 +187,14 @@ class TemplateBuilder:
         self._git(repo, "tag", "assessment-start")
         self._write(repo, "src/config.py", 'CONFIG_PATH = "config/production.json"\n')
         self._commit_all(repo, "Fix configuration loading")
+        self._clear_reflogs(repo)
 
     def _task03(self) -> None:
         repo = self._new_repo("task03")
         self._write(repo, "src/login.py", "LOGIN_TIMEOUT = 30\n\ndef login():\n    return LOGIN_TIMEOUT\n")
         self._commit_all(repo, "Initial login service")
         self._git(repo, "tag", "assessment-start")
+        self._clear_reflogs(repo)
 
     def _task04(self) -> None:
         task_root = self.root / "task04"
@@ -188,6 +204,7 @@ class TemplateBuilder:
         origin.mkdir(parents=True)
         self._git(repo, "init", "-b", "main")
         self._git(repo, "config", "core.longpaths", "true")
+        self._git(repo, "config", "core.autocrlf", "false")
         self._git(repo, "config", "user.name", "Git Assessment")
         self._git(repo, "config", "user.email", "git-assessment@example.invalid")
         subprocess.run(["git", "init", "--bare", str(origin)], check=True, capture_output=True)
@@ -207,6 +224,7 @@ class TemplateBuilder:
         self._git(repo, "push", "origin", "HEAD:refs/assessment/pending-main")
         self._git(repo, "reset", "--hard", initial_sha)
         self._git(repo, "switch", "feature/login-timeout")
+        self._clear_reflogs(repo)
 
     def _task05(self) -> None:
         repo = self._new_repo("task05")
@@ -223,12 +241,18 @@ class TemplateBuilder:
         self._git(repo, "push", "-u", "origin", "main")
         self._git(repo, "switch", "-c", "hotfix/check-status", "assessment-start")
         self._write(repo, "src/status.py", 'STATUS = "healthy"\n')
+        self._write(
+            repo,
+            "notes/development.md",
+            "# Development Notes\n\nStable notes.\n\nHotfix: verified status endpoint health.\n",
+        )
         self._commit_all(repo, "Update status check")
         self._git(repo, "push", "-u", "origin", "hotfix/check-status")
         self._git(repo, "switch", "-c", "feature/login-timeout", "assessment-start")
         self._git(repo, "branch", "-D", "hotfix/check-status")
         self._git(repo, "update-ref", "-d", "refs/remotes/origin/hotfix/check-status")
         self._git(repo, "config", "assessment.templateVersion", str(self.VERSION))
+        self._clear_reflogs(repo)
         self._write(
             repo,
             "notes/development.md",
@@ -250,3 +274,4 @@ class TemplateBuilder:
         )
         self._commit_all(repo, "Reject empty validation values")
         self._git(repo, "switch", "-c", "feature/login-timeout", "assessment-start")
+        self._clear_reflogs(repo)

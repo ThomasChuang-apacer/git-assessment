@@ -142,6 +142,7 @@ class AssessmentService:
                             "completed_at": None,
                             "check_attempts": 0,
                             "reset_count": 0,
+                            "repair_count": 0,
                             "hints_used": 0,
                             "viewed_hints": [],
                             "last_checks": [],
@@ -171,6 +172,9 @@ class AssessmentService:
             res = self.git.run(repo, "rev-parse", "--verify", ref, check=False)
             if res.returncode == 0 and res.stdout:
                 baseline[key] = res.stdout.strip()
+        reflog_res = self.git.run(repo, "reflog", "--format=%gs", check=False)
+        reflog_lines = [line for line in reflog_res.stdout.splitlines() if line] if reflog_res.returncode == 0 else []
+        baseline["reflog_count"] = str(len(reflog_lines))
         if task_id == "task04":
             orig_main = self.git.run(repo, "rev-parse", "--verify", "refs/remotes/origin/main", check=False)
             if orig_main.returncode == 0 and orig_main.stdout:
@@ -264,6 +268,8 @@ class AssessmentService:
             except OSError as exc:
                 raise ValueError("無法刪除測驗紀錄，請先關閉正在使用該題目的 Terminal 或編輯器後再試一次") from exc
 
+            self._cleanup_session_quarantine(session_id)
+
             remaining = self._candidate_records(candidate_key)
             remaining.sort(key=lambda item: item[1].get("started_at", ""), reverse=True)
             if remaining:
@@ -277,6 +283,21 @@ class AssessmentService:
                     candidate_root.rmdir()
                 except OSError:
                     pass
+
+    def _cleanup_session_quarantine(self, session_id: str) -> None:
+        quarantine_ws = self.quarantine_root / "workspaces"
+        if not quarantine_ws.is_dir():
+            return
+        marker = f"-{session_id}-"
+        for entry in list(quarantine_ws.iterdir()):
+            if marker in entry.name:
+                try:
+                    if entry.is_dir():
+                        shutil.rmtree(entry, onerror=self._remove_readonly)
+                    else:
+                        entry.unlink(missing_ok=True)
+                except OSError as exc:
+                    self.log.warning("無法清理隔離備份 %s：%s", entry, exc)
 
     def get_question(self, task_id: str) -> dict:
         for question in self.questions:
@@ -362,7 +383,6 @@ class AssessmentService:
             task = self.task_state(result, task_id)
             task.update(
                 status="not_started",
-                first_opened_at=None,
                 completed_at=None,
                 reset_count=task.get("reset_count", 0) + 1,
                 last_checks=[],
@@ -394,7 +414,11 @@ class AssessmentService:
                     }
                 )
                 self._save_result(result)
-            return {"hints_used": task.get("hints_used", 0), "viewed_hints": viewed}
+            return {
+                "hints_used": task.get("hints_used", 0),
+                "viewed_hints": list(viewed),
+                "hint_text": hints[hint_index],
+            }
 
     def simulate_remote_update(self, session_id: str, task_id: str) -> dict:
         if task_id != "task04":
@@ -711,7 +735,7 @@ class AssessmentService:
             if (repo / ".git").exists() and origin.exists():
                 self.git.run(repo, "remote", "set-url", "origin", str(origin.resolve()))
 
-    def runtime_health(self) -> dict:
+    def runtime_health(self, include_sessions: bool = True) -> dict:
         sessions = []
         issue_count = 0
         for path in self.result_root.glob("*.json"):
@@ -725,13 +749,15 @@ class AssessmentService:
                 issue_count += 1
         leftovers = list(self.workspace_root.rglob(".reset-stage-*")) + list(self.workspace_root.rglob(".transaction-*.json"))
         issue_count += len(leftovers)
-        return {
+        payload = {
             "healthy": issue_count == 0,
             "issue_count": issue_count,
-            "sessions": sessions,
             "instance_id": self.instance_id,
             "project_root": str(self.project_root),
         }
+        if include_sessions:
+            payload["sessions"] = sessions
+        return payload
 
     def session_task_health(self, result: dict) -> dict[str, dict]:
         workspace = self._safe_existing_workspace(result)
@@ -749,12 +775,11 @@ class AssessmentService:
                 raise ValueError("此題已完成；修復會重設作答，請先進行考官確認")
             workspace = self._safe_existing_workspace(result)
             question = self.get_question(task_id)
-            self._repair_corrupt_task(workspace, question)
+            self._repair_corrupt_task(workspace, question, reason_prefix="repair", session_id=session_id)
             task.update(
                 status="not_started",
-                first_opened_at=None,
                 completed_at=None,
-                reset_count=task.get("reset_count", 0) + 1,
+                repair_count=task.get("repair_count", 0) + 1,
                 last_checks=[],
                 baseline=self._capture_task_baseline(workspace, task_id),
             )
@@ -812,11 +837,11 @@ class AssessmentService:
                     )
                     if ok or task["status"] == "completed":
                         continue
-                    self._repair_corrupt_task(workspace, question)
+                    self._repair_corrupt_task(workspace, question, reason_prefix="corrupt", session_id=result["session_id"])
                     task.update(
                         status="not_started",
-                        first_opened_at=None,
                         completed_at=None,
+                        repair_count=task.get("repair_count", 0) + 1,
                         last_checks=[],
                         baseline=self._capture_task_baseline(workspace, question["id"]),
                     )
@@ -832,11 +857,21 @@ class AssessmentService:
             except (OSError, ValueError, KeyError, RuntimeError, json.JSONDecodeError) as exc:
                 self.log.error("Workspace 健康修復失敗 %s: %s", result_path, exc)
 
-    def _repair_corrupt_task(self, workspace: Path, question: dict) -> None:
+    def _repair_corrupt_task(
+        self,
+        workspace: Path,
+        question: dict,
+        reason_prefix: str = "corrupt",
+        session_id: str | None = None,
+    ) -> None:
         task_id = question["id"]
         stage = workspace / f".repair-stage-{uuid.uuid4().hex}"
         task_dir = workspace / task_id
         origin_dir = workspace / ".origins" / f"{task_id}.git"
+        task_reason = f"{reason_prefix}-{task_id}-{session_id}" if session_id else f"{reason_prefix}-{task_id}"
+        origin_reason = (
+            f"{reason_prefix}-{task_id}-origin-{session_id}" if session_id else f"{reason_prefix}-{task_id}-origin"
+        )
         stage.mkdir()
         try:
             self._copy_task(question, stage)
@@ -844,9 +879,9 @@ class AssessmentService:
             if not ok:
                 raise RuntimeError(message)
             if task_dir.exists():
-                self._quarantine_directory(task_dir, f"corrupt-{task_id}")
+                self._quarantine_directory(task_dir, task_reason)
             if origin_dir.exists():
-                self._quarantine_directory(origin_dir, f"corrupt-{task_id}-origin")
+                self._quarantine_directory(origin_dir, origin_reason)
             os.replace(stage / task_id, task_dir)
             staged_origin = stage / ".origins" / f"{task_id}.git"
             if staged_origin.exists():
@@ -925,6 +960,7 @@ class AssessmentService:
                 if isinstance(task, dict):
                     task.setdefault("first_opened_at", None)
                     task.setdefault("reset_count", 0)
+                    task.setdefault("repair_count", 0)
                     task.setdefault("hints_used", 0)
                     task.setdefault("viewed_hints", [])
                     task.setdefault("baseline", {})
@@ -967,6 +1003,7 @@ class AssessmentService:
                 raise ValueError("題目檢查資料格式錯誤")
             task.setdefault("first_opened_at", None)
             task.setdefault("reset_count", 0)
+            task.setdefault("repair_count", 0)
             task.setdefault("hints_used", 0)
             task.setdefault("viewed_hints", [])
             task.setdefault("baseline", {})
@@ -1016,7 +1053,7 @@ class AssessmentService:
             "file_in_commit", "file_not_in_commit", "working_tree_modified", "working_tree_clean",
             "untracked_file", "stash_count", "no_operation_in_progress", "is_ancestor",
             "not_is_ancestor", "no_merge_commit", "ref_equals", "reflog_contains",
-            "reflog_contains_action", "patch_equivalent",
+            "reflog_contains_action", "reflog_checkout_to", "patch_equivalent",
         }
         ids = [q["id"] for q in self.questions]
         orders = [q["order"] for q in self.questions]
@@ -1082,11 +1119,16 @@ class AssessmentService:
                     "status": state["status"],
                     "check_attempts": state["check_attempts"],
                     "reset_count": state.get("reset_count", 0),
+                    "repair_count": state.get("repair_count", 0),
                     "hints_used": state.get("hints_used", 0),
                     "first_opened_at": state.get("first_opened_at"),
                     "completed_at": state.get("completed_at"),
                     "duration_seconds": task_seconds,
-                    "duration_display": format_duration(task_seconds) if state["status"] == "completed" else "—",
+                    "duration_display": (
+                        format_duration(task_seconds)
+                        if state["status"] == "completed" and task_seconds is not None
+                        else "—"
+                    ),
                 }
             )
         event_labels = {
@@ -1119,10 +1161,15 @@ class AssessmentService:
             "started_at": result["started_at"],
             "completed_at": result["completed_at"],
             "duration_seconds": total_seconds,
-            "duration_display": format_duration(total_seconds),
+            "duration_display": (
+                format_duration(total_seconds)
+                if total_seconds is not None
+                else ("—" if result.get("completed_at") else "尚未完成")
+            ),
             "completed_count": sum(1 for item in tasks if item["status"] == "completed"),
             "total": len(tasks),
             "total_resets": sum(item["reset_count"] for item in tasks),
+            "total_repairs": sum(item["repair_count"] for item in tasks),
             "total_hints": sum(item["hints_used"] for item in tasks),
             "integrity_hash": integrity_hash,
             "integrity_short": integrity_hash[:12] if integrity_hash else "無",

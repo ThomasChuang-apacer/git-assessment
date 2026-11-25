@@ -68,13 +68,13 @@
 
       <fieldset class="mode-picker">
         <legend>測驗模式</legend>
-        <label class="mode-option">
-          <input type="radio" name="mode" value="practice" checked>
-          <span><strong>練習模式</strong><small>顯示逐步指引與修正建議</small></span>
+        <label class="mode-option" for="mode-practice">
+          <input type="radio" id="mode-practice" name="mode" value="practice" aria-labelledby="mode-practice-label" aria-describedby="mode-practice-desc" checked>
+          <span><strong id="mode-practice-label">練習模式</strong><small id="mode-practice-desc">顯示逐步指引與修正建議</small></span>
         </label>
-        <label class="mode-option">
-          <input type="radio" name="mode" value="exam">
-          <span><strong>考試模式</strong><small>僅提供任務目標與限制，提示另計次數</small></span>
+        <label class="mode-option" for="mode-exam">
+          <input type="radio" id="mode-exam" name="mode" value="exam" aria-labelledby="mode-exam-label" aria-describedby="mode-exam-desc">
+          <span><strong id="mode-exam-label">考試模式</strong><small id="mode-exam-desc">僅提供任務目標與限制，提示另計次數</small></span>
         </label>
       </fieldset>
 

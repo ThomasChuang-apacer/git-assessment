@@ -879,3 +879,317 @@ def test_ansi_stripping_log_formatter():
     record = logging.LogRecord("test", logging.INFO, "", 0, '\x1b[31m\x1b[1m"GET / HTTP/1.1" 404\x1b[0m', (), None)
     assert formatter.format(record) == '"GET / HTTP/1.1" 404'
 
+
+def test_launcher_script_encodings_are_windows_safe():
+    vbs_files = list(PROJECT_ROOT.rglob("*.vbs"))
+    assert vbs_files
+    for path in vbs_files:
+        raw = path.read_bytes()
+        assert all(byte < 128 for byte in raw), f"{path.name} must remain pure 7-bit ASCII for Windows VBScript"
+
+    ps1_files = list((PROJECT_ROOT / "scripts").glob("*.ps1"))
+    assert ps1_files
+    for path in ps1_files:
+        raw = path.read_bytes()
+        assert raw.startswith(b"\xef\xbb\xbf"), f"{path.name} must start with UTF-8 BOM for Windows PowerShell 5.1"
+
+
+def test_task05_blocks_no_stash_switch_and_branch_track_shortcut(assessment):
+    _, service, result = assessment
+    session_id = result["session_id"]
+    repo = service.task_repo(result, "task05")
+
+    assert git(repo, "config", "--get", "core.autocrlf").stdout.strip() == "false"
+
+    initial = service.check_task(session_id, "task05")
+    initial_checks = {item["check_id"]: item for item in initial["checks"]}
+    assert initial_checks["switched-back"]["passed"] is False
+
+    # Without stash, switching to origin/hotfix/check-status must be rejected due to notes/development.md conflict
+    git(repo, "fetch", "origin")
+    no_stash_switch = git(repo, "switch", "--track", "origin/hotfix/check-status", check=False)
+    assert no_stash_switch.returncode != 0
+
+    # Shortcut using `git branch --track` without actually switching must not pass
+    git(repo, "branch", "--track", "hotfix/check-status", "origin/hotfix/check-status")
+    shortcut = service.check_task(session_id, "task05")
+    shortcut_checks = {item["check_id"]: item["passed"] for item in shortcut["checks"]}
+    assert shortcut["completed"] is False
+    assert shortcut_checks["hotfix-branch"] is True
+    assert shortcut_checks["hotfix-updated"] is True
+    assert shortcut_checks["switched-back"] is False
+
+
+def test_spoofed_reflog_commit_messages_do_not_bypass_process_checks(assessment):
+    _, service, result = assessment
+    session_id = result["session_id"]
+
+    # Task 02: spoof "commit (amend)" inside a regular commit message then reset
+    repo2 = service.task_repo(result, "task02")
+    (repo2 / "tests/test_config.py").write_text(
+        'from src.config import CONFIG_PATH\n\n\ndef test_config_path():\n    assert CONFIG_PATH == "config/production.json"\n',
+        encoding="utf-8",
+    )
+    git(repo2, "commit", "--allow-empty", "-m", "commit (amend)")
+    git(repo2, "reset", "--soft", "HEAD~2")
+    git(repo2, "add", "-A")
+    git(repo2, "commit", "-m", "Fix configuration loading")
+    t2 = service.check_task(session_id, "task02")
+    t2_checks = {item["check_id"]: item["passed"] for item in t2["checks"]}
+    assert t2["completed"] is False
+    assert t2_checks["used-amend"] is False
+
+    # Task 06: spoof "cherry-pick" inside a regular commit message + manual file copy
+    repo6 = service.task_repo(result, "task06")
+    git(repo6, "commit", "--allow-empty", "-m", "cherry-pick")
+    git(repo6, "reset", "--hard", "HEAD~1")
+    (repo6 / "src/validator.py").write_text(
+        'def is_valid(value):\n    return value is not None and value.strip() != ""\n',
+        encoding="utf-8",
+    )
+    git(repo6, "add", "src/validator.py")
+    git(repo6, "commit", "-m", "Reject empty validation values")
+    t6 = service.check_task(session_id, "task06")
+    t6_checks = {item["check_id"]: item["passed"] for item in t6["checks"]}
+    assert t6["completed"] is False
+    assert t6_checks["used-cherry-pick"] is False
+
+
+def test_task04_rejects_indented_conflict_markers_commented_stale_values_and_extra_commits(assessment):
+    _, service, result = assessment
+    session_id = result["session_id"]
+    repo = service.task_repo(result, "task04")
+
+    # Pre-fetch error message should not leak unseen remote SHA
+    pending_sha = service.task_state(result, "task04")["baseline"]["remote_pending_main"]
+    pre = service.check_task(session_id, "task04")
+    for item in pre["checks"]:
+        assert pending_sha[:7] not in item["message"]
+
+    # Indented conflict marker + commented stale value must fail
+    service.simulate_remote_update(session_id, "task04")
+    git(repo, "fetch", "origin")
+    rebase = git(repo, "rebase", "origin/main", check=False)
+    assert rebase.returncode != 0
+    (repo / "src/login.py").write_text(
+        " <<<<<<< HEAD\nLOGIN_TIMEOUT = 60\nLOGIN_RETRY = 5\n# LOGIN_TIMEOUT = 45\n",
+        encoding="utf-8",
+    )
+    git(repo, "add", "src/login.py")
+    git(repo, "-c", "core.editor=true", "rebase", "--continue")
+    dirty = service.check_task(session_id, "task04")
+    dirty_checks = {item["check_id"]: item["passed"] for item in dirty["checks"]}
+    assert dirty["completed"] is False
+    assert dirty_checks["no-conflict-markers"] is False
+    assert dirty_checks["no-stale-values"] is False
+
+    # Clean file + extra commit must fail single-commit check
+    (repo / "src/login.py").write_text("LOGIN_TIMEOUT = 60\nLOGIN_RETRY = 5\n", encoding="utf-8")
+    git(repo, "add", "src/login.py")
+    git(repo, "commit", "--amend", "--no-edit")
+    git(repo, "commit", "--allow-empty", "-m", "Extra stray commit")
+    extra = service.check_task(session_id, "task04")
+    extra_checks = {item["check_id"]: item["passed"] for item in extra["checks"]}
+    assert extra["completed"] is False
+    assert extra_checks["single-commit"] is False
+
+
+def test_examiner_pin_privacy_isolation_lockout_prg_and_config_file(tmp_path: Path, monkeypatch):
+    monkeypatch.delenv("GIT_ASSESSMENT_EXAMINER_PIN", raising=False)
+    data_root = tmp_path / "runtime"
+    data_root.mkdir(parents=True, exist_ok=True)
+    (data_root / "examiner.json").write_text(json.dumps({"pin": "9876"}), encoding="utf-8")
+
+    app = create_app(
+        {
+            "TESTING": True,
+            "SECRET_KEY": "pin-test-secret",
+            "TEMPLATE_ROOT": PROJECT_ROOT / "data" / "templates",
+            "DATA_ROOT": data_root,
+            "QUESTIONS_PATH": PROJECT_ROOT / "questions" / "questions.json",
+        }
+    )
+    assert app.config["EXAMINER_PIN"] == "9876"
+    token = app.config["LOCAL_API_TOKEN"]
+
+    owner = app.test_client()
+    created = owner.post(
+        "/api/sessions",
+        data={"_api_token": token, "_confirm": "create", "candidate_name": "Alice", "mode": "exam"},
+        headers={"Accept": "application/json"},
+    )
+    assert created.status_code == 201
+    sid = created.get_json()["session_id"]
+
+    # /api/health must not list session IDs
+    health = owner.get("/api/health").get_json()
+    assert "sessions" not in health
+    assert health["healthy"] is True
+
+    # Header hides examiner link while locked
+    home_html = owner.get("/").get_data(as_text=True)
+    assert "header-examiner" not in home_html
+
+    # Another browser without matching cookie cannot access Alice's pages or task APIs
+    other = app.test_client()
+    assert other.get(f"/assessment/{sid}").status_code == 403
+    assert other.get(f"/assessment/{sid}/tasks/task01").status_code == 403
+    assert other.get(f"/assessment/{sid}/result").status_code == 403
+    assert (
+        other.post(
+            f"/api/sessions/{sid}/tasks/task01/check",
+            headers={"X-Git-Assessment-Token": token, "Accept": "application/json"},
+        ).status_code
+        == 403
+    )
+
+    # HTML wrong PIN uses PRG redirect to /examiner and shows error message
+    bad_form = other.post(
+        "/api/examiner/unlock",
+        data={"_api_token": token, "pin": "1111"},
+        headers={"Accept": "text/html"},
+    )
+    assert bad_form.status_code == 302
+    assert bad_form.headers["Location"].endswith("/examiner")
+    after_redirect = other.get("/examiner").get_data(as_text=True)
+    assert "考官 PIN 碼錯誤" in after_redirect
+
+    # 4 more wrong JSON attempts trigger lockout (5 total -> 429)
+    for _ in range(3):
+        resp = other.post(
+            "/api/examiner/unlock",
+            json={"pin": "0000"},
+            headers={"X-Git-Assessment-Token": token, "Accept": "application/json"},
+        )
+        assert resp.status_code == 403
+    locked_resp = other.post(
+        "/api/examiner/unlock",
+        json={"pin": "0000"},
+        headers={"X-Git-Assessment-Token": token, "Accept": "application/json"},
+    )
+    assert locked_resp.status_code == 429
+    # Even correct PIN is rejected while locked
+    still_locked = other.post(
+        "/api/examiner/unlock",
+        json={"pin": "9876"},
+        headers={"X-Git-Assessment-Token": token, "Accept": "application/json"},
+    )
+    assert still_locked.status_code == 429
+
+    # Simulate lockout expiration -> correct PIN unlocks and grants access to Alice's result
+    app.extensions["examiner_auth_state"]["locked_until"] = 0.0
+    unlocked = other.post(
+        "/api/examiner/unlock",
+        json={"pin": "9876"},
+        headers={"X-Git-Assessment-Token": token, "Accept": "application/json"},
+    )
+    assert unlocked.status_code == 200
+    assert other.get(f"/assessment/{sid}/result").status_code == 200
+
+    # Without PIN configured, /api/examiner/unlock returns 400 JSON
+    no_pin_app = create_app(
+        {
+            "TESTING": True,
+            "SECRET_KEY": "no-pin-secret",
+            "EXAMINER_PIN": "",
+            "TEMPLATE_ROOT": PROJECT_ROOT / "data" / "templates",
+            "DATA_ROOT": tmp_path / "runtime-nopin",
+            "QUESTIONS_PATH": PROJECT_ROOT / "questions" / "questions.json",
+        }
+    )
+    no_pin_resp = no_pin_app.test_client().post(
+        "/api/examiner/unlock",
+        json={"pin": "1234"},
+        headers={"X-Git-Assessment-Token": no_pin_app.config["LOCAL_API_TOKEN"], "Accept": "application/json"},
+    )
+    assert no_pin_resp.status_code == 400
+
+
+def test_exam_mode_hides_unviewed_hints_and_scrubs_failure_commands(assessment):
+    app, service, _ = assessment
+    token = app.config["LOCAL_API_TOKEN"]
+    client = app.test_client()
+
+    created = client.post(
+        "/api/sessions",
+        data={"_api_token": token, "_confirm": "create", "candidate_name": "Exam Candidate", "mode": "exam"},
+        headers={"Accept": "application/json"},
+    )
+    sid = created.get_json()["session_id"]
+
+    # Unviewed hints must not appear in HTML source; exam_label replaces command-naming labels
+    task06_html = client.get(f"/assessment/{sid}/tasks/task06").get_data(as_text=True)
+    assert "git cherry-pick &lt;SHA&gt;" not in task06_html
+    assert "git log --oneline fix/validation" not in task06_html
+    assert "以單一 commit 套用方式帶入修正" in task06_html
+
+    # Clicking hint fetches hint_text dynamically via API and records usage
+    hint_resp = client.post(
+        f"/api/sessions/{sid}/tasks/task06/hint",
+        json={"hint_index": 1},
+        headers={"X-Git-Assessment-Token": token, "X-Git-Assessment-Request-ID": "exam-hint-0001"},
+    )
+    assert hint_resp.status_code == 200
+    hint_data = hint_resp.get_json()
+    assert hint_data["hints_used"] == 1
+    assert "git cherry-pick" in hint_data["hint_text"]
+
+    # Exam failure messages must not leak Git commands
+    leaked_tokens = ("git fetch", "git rebase", "git cherry-pick", "git commit --amend", "git stash pop", "git switch --track")
+    for task_id in ("task02", "task04", "task05", "task06"):
+        outcome = service.check_task(sid, task_id)
+        for item in outcome["checks"]:
+            if not item["passed"]:
+                for bad in leaked_tokens:
+                    assert bad not in item["message"], f"{task_id}/{item['check_id']} leaked {bad}: {item['message']}"
+
+
+def test_waiting_state_duration_repair_count_and_quarantine_cleanup(assessment):
+    _, service, result = assessment
+    sid = result["session_id"]
+
+    # Initial untouched check marks passive checks as waiting rather than passed
+    initial = service.check_task(sid, "task01")
+    states = {item["check_id"]: item["display_state"] for item in initial["checks"]}
+    assert states["readme-modified"] == "waiting"
+    assert states["debug-untracked"] == "waiting"
+    assert states["readme-not-commit"] == "waiting"
+    assert states["debug-not-commit"] == "waiting"
+    assert states["single-commit"] == "failed"
+
+    # Reset preserves first_opened_at
+    service.mark_opened(sid, "task01")
+    opened_at = service.task_state(service.get_session(sid), "task01")["first_opened_at"]
+    assert opened_at is not None
+    service.reset_task(sid, "task01")
+    after_reset = service.task_state(service.get_session(sid), "task01")
+    assert after_reset["first_opened_at"] == opened_at
+    assert after_reset["reset_count"] == 1
+    assert after_reset["repair_count"] == 0
+
+    # Completed task without first_opened_at renders "—" instead of "尚未完成"
+    repo2 = service.task_repo(service.get_session(sid), "task02")
+    (repo2 / "tests/test_config.py").write_text(
+        'from src.config import CONFIG_PATH\n\n\ndef test_config_path():\n    assert CONFIG_PATH == "config/production.json"\n',
+        encoding="utf-8",
+    )
+    git(repo2, "add", "tests/test_config.py")
+    git(repo2, "commit", "--amend", "--no-edit")
+    assert service.check_task(sid, "task02")["completed"] is True
+    summary = service.build_result_summary(service.get_session(sid))
+    t2_summary = next(item for item in summary["tasks"] if item["task_id"] == "task02")
+    assert t2_summary["status"] == "completed"
+    assert t2_summary["duration_display"] == "—"
+
+    # Examiner repair increments repair_count (not reset_count) and labels backup with repair-
+    service.repair_task(sid, "task03")
+    t3_state = service.task_state(service.get_session(sid), "task03")
+    assert t3_state["repair_count"] == 1
+    assert t3_state["reset_count"] == 0
+    backups = list((service.quarantine_root / "workspaces").glob(f"task03-repair-task03-{sid}-*"))
+    assert len(backups) == 1
+
+    # Deleting session cleans up its matching quarantine backup
+    service.delete_session(sid)
+    assert not list((service.quarantine_root / "workspaces").glob(f"*{sid}*"))
+
