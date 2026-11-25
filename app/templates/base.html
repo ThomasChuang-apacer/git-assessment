@@ -35,6 +35,17 @@
       <p>測驗進度已保存，現在可以關閉此頁。</p>
     </div>
   </section>
+  <dialog class="confirm-dialog" id="confirm-dialog" aria-labelledby="confirm-dialog-title" aria-describedby="confirm-dialog-message">
+    <form method="dialog" class="confirm-panel">
+      <h2 id="confirm-dialog-title"></h2>
+      <p id="confirm-dialog-message"></p>
+      <div class="confirm-actions">
+        <button class="button button-secondary" type="submit" value="cancel" id="confirm-dialog-cancel">取消</button>
+        <button class="button button-primary" type="submit" value="confirm" id="confirm-dialog-ok">確定</button>
+      </div>
+    </form>
+  </dialog>
+  <div class="visually-hidden" id="live-region" aria-live="polite"></div>
   <script src="{{ url_for('static', filename='app.js') }}" defer></script>
 </body>
 </html>

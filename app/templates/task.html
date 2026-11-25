@@ -16,10 +16,22 @@
           </button>
         </div>
       </div>
-      <div class="mini-progress" role="status" aria-live="polite"><strong id="completed-count">{{ completed }}</strong> / {{ total }} 完成</div>
+      <div class="mini-progress" role="status" aria-live="polite">整體進度 <strong id="completed-count">{{ completed }}</strong> / {{ total }} 題完成</div>
     </div>
 
     <p class="task-description">{{ question.description }}</p>
+
+    <section class="repo-block">
+      <div>
+        <span class="repo-label">REPOSITORY · 請在這個資料夾執行 Git 指令</span>
+        <code id="repo-path">{{ repo }}</code>
+      </div>
+      <div class="repo-actions">
+        <button class="button button-secondary" type="button" data-copy-target="repo-path">複製路徑</button>
+        <button class="button button-secondary" type="button" id="open-folder">開啟資料夾</button>
+      </div>
+      <p id="repo-message" class="inline-message" role="status"></p>
+    </section>
 
     {% include "_repository_guide.html" %}
 
@@ -45,6 +57,7 @@
       <button class="button button-secondary" type="button" id="simulate-remote-update">
         {% if remote_update_status.remote_updated %}遠端更新已建立{% else %}{{ question.remote_update_action.button_label }}{% endif %}
       </button>
+      <p id="remote-message" class="inline-message" role="status"></p>
       {% else %}
       <p>{{ remote_update_status.message }}</p>
       {% endif %}
@@ -75,16 +88,6 @@
     </section>
     {% endif %}
 
-    <section class="repo-block">
-      <div>
-        <span class="repo-label">REPOSITORY</span>
-        <code id="repo-path">{{ repo }}</code>
-      </div>
-      <div class="repo-actions">
-        <button class="button button-secondary" type="button" data-copy-target="repo-path">複製路徑</button>
-        <button class="button button-secondary" type="button" id="open-folder">開啟資料夾</button>
-      </div>
-    </section>
 
     <div class="task-navigation">
       {% if previous %}
@@ -101,7 +104,7 @@
   <aside class="check-panel" aria-labelledby="task-status-title">
     <div class="check-panel-header">
       <div>
-        <span class="card-kicker">完成條件</span>
+        <span class="card-kicker">完成條件 · <span id="check-summary">{% if state.last_checks %}{{ state.last_checks | selectattr('passed') | list | length }} / {{ state.last_checks | length }} 通過{% else %}共 {{ question.checks | length }} 項{% endif %}</span></span>
         <h2 id="task-status-title">{% if state.status == 'completed' %}任務已完成{% else %}準備好就檢查{% endif %}</h2>
       </div>
       <span id="task-checkmark" class="big-check {{ 'is-complete' if state.status == 'completed' else '' }}" aria-hidden="true">✓</span>
@@ -125,9 +128,14 @@
       {% endif %}
     </div>
 
-    <button class="button button-primary button-wide" type="button" id="check-task">檢查結果</button>
+    <a class="button button-primary button-wide" id="next-step-link" href="{% if next_task %}{{ url_for('main.task', session_id=result.session_id, task_id=next_task.id) }}{% else %}{{ url_for('main.overview', session_id=result.session_id) }}{% endif %}" {% if state.status != 'completed' %}hidden{% endif %}>{% if next_task %}前往下一題 →{% else %}返回任務總覽 →{% endif %}</a>
+    <button class="button {{ 'button-secondary' if state.status == 'completed' else 'button-primary' }} button-wide" type="button" id="check-task" data-check-trigger>{% if state.status == 'completed' %}重新檢查{% else %}檢查結果{% endif %}</button>
     <button class="button button-quiet button-wide" type="button" id="reset-task">重設本題</button>
     <p id="action-message" class="action-message" role="status"></p>
   </aside>
+</div>
+<div class="check-dock" id="check-dock">
+  <span class="check-dock-summary">完成條件 <strong id="check-dock-summary">{% if state.last_checks %}{{ state.last_checks | selectattr('passed') | list | length }} / {{ state.last_checks | length }} 通過{% else %}尚未檢查{% endif %}</strong></span>
+  <button class="button button-primary" type="button" data-check-trigger>檢查結果</button>
 </div>
 {% endblock %}

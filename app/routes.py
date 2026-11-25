@@ -37,11 +37,23 @@ def handle_known_error(error):
     return render_template("error.html", message=message), 400
 
 
+HTTP_ERROR_MESSAGES = {
+    400: "要求內容不正確，請回到上一頁再試一次。",
+    403: "這個操作沒有通過安全驗證，請重新整理頁面後再試一次。",
+    404: "找不到這個頁面。網址可能打錯了，或這份測驗紀錄已被刪除。",
+    405: "這個網址不支援目前的操作方式，請從頁面上的按鈕操作。",
+    500: "程式發生未預期的錯誤，請重新整理頁面；若持續發生，請聯絡考官。",
+}
+
+
 @bp.app_errorhandler(HTTPException)
 def handle_http_error(error: HTTPException):
     if wants_json_response():
         return jsonify({"error": error.description}), error.code
-    return render_template("error.html", message=error.description), error.code
+    message = error.description
+    if message == type(error).description:
+        message = HTTP_ERROR_MESSAGES.get(error.code, f"目前無法處理這個要求（錯誤代碼 {error.code}）。")
+    return render_template("error.html", message=message), error.code
 
 
 @bp.get("/")

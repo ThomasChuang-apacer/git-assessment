@@ -55,13 +55,13 @@
     <div class="task-card-top">
       <span class="task-number">0{{ question.order }}</span>
       <span class="state-label">
-        {% if state.status == 'completed' %}✓ 已完成{% elif state.status == 'in_progress' %}進行中{% else %}尚未開始{% endif %}
+        {% if state.status == 'completed' %}✓ 已完成{% elif state.check_attempts %}進行中{% elif state.status == 'in_progress' %}已開啟{% else %}尚未開始{% endif %}
       </span>
     </div>
     <h2>{{ question.title }}</h2>
     <p>{{ question.description }}</p>
     <div class="task-card-footer">
-      <span>{{ question.checks|length }} 項完成條件</span>
+      <span>{% if state.last_checks %}上次檢查：{{ state.last_checks | selectattr('passed') | list | length }} / {{ state.last_checks | length }} 項通過{% else %}{{ question.checks|length }} 項完成條件・尚未檢查{% endif %}</span>
       <span class="card-arrow" aria-hidden="true">→</span>
     </div>
   </a>
