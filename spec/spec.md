@@ -56,17 +56,18 @@
 
 啟動行為：
 
-1. `Start Git Assessment.vbs` 維持純 7-bit ASCII 英文（確保 Windows VBScript ANSI 編譯相容），並透過 `/api/health` 核對 `project_root`（`instance_id`）：若同一目錄已在執行，直接開啟瀏覽器；若端口被其他目錄的 Git Assessment 占用，則跳出警告避免誤連錯誤實例。
+1. `Start Git Assessment.vbs` 維持純 7-bit ASCII 英文（確保 Windows VBScript ANSI 編譯相容），先讀取 `runtime/server-url.txt` 與預設 port 核對 `/api/health` 的 `project_root`：若同一目錄已在執行，直接開啟既有網址；若未手動指定 `GIT_ASSESSMENT_PORT` 且 `8765` 被其他程式／資料夾占用，`run.py` 會自動切換至下一個可用 port（`8766`–`8799`）；若已手動指定 port 且被其他 Git Assessment 占用，則顯示占用資料夾並詢問是否開啟該頁面按安全關閉。
 2. 建立或驗證 `.venv`（若專案包含 `wheels/*.whl`，使用 `--no-index --find-links=wheels` 離線安裝）。
-3. 透過 `First Start Git Assessment.ps1`（UTF-8 BOM，支援 `FirstStart` 與 `Starting` 模式）顯示啟動進度視窗。
+3. 透過 `First Start Git Assessment.ps1`（UTF-8 BOM，支援 `FirstStart` 與 `Starting` 模式，依 `runtime/server-url.txt` 偵測實際綁定 port）顯示啟動進度視窗。
 4. 建立或驗證六題離線 Git templates（目前版本 `TemplateBuilder.VERSION = 9`，清空範本建置 reflog 並設定 `core.autocrlf=false`）。
-5. 啟動綁定於 `127.0.0.1` 的本機 Web Server（支援 `RotatingFileHandler` 自動去除 ANSI 控制碼）。
+5. 啟動綁定於 `127.0.0.1` 的本機 Web Server（支援 `RotatingFileHandler` 自動去除 ANSI 控制碼，並於無請求閒置滿 2 小時後自動安全關閉，避免背景行程長期殘留）。
 
 可用環境變數／設定檔：
 
 | 來源 | 用途 |
 |---|---|
-| `GIT_ASSESSMENT_PORT` | 修改服務 port（預設 `8765`） |
+| `GIT_ASSESSMENT_PORT` | 嚴格指定服務 port（未設定時預設 `8765`，被占用會自動往 `8766`–`8799` 找空 port） |
+| `GIT_ASSESSMENT_IDLE_TIMEOUT_SECONDS` | 閒置自動關閉秒數（預設 `7200` 秒＝2 小時；設為 `0` 可停用） |
 | `GIT_ASSESSMENT_NO_BROWSER=1` | 啟動後不自動開啟瀏覽器 |
 | `GIT_ASSESSMENT_EXAMINER_PIN` | 設定考官模式 PIN 碼（優先於設定檔）；設定後啟用共用電腦隱私保護 |
 | `runtime/examiner.json` | 選用設定檔 `{"pin": "..."}`，當未設定環境變數時自動讀取 |
