@@ -28,7 +28,18 @@ class CheckEngine:
     ) -> list[dict]:
         resolved_baseline = baseline or {}
         resolved_context = context or {}
-        return [self.run_one(repo, check, resolved_baseline, resolved_context) for check in checks]
+        results = [self.run_one(repo, check, resolved_baseline, resolved_context) for check in checks]
+        action_results = [item for cfg, item in zip(checks, results) if not cfg.get("passive", False)]
+        has_action_progress = True if not action_results else any(item["passed"] for item in action_results)
+        for cfg, item in zip(checks, results):
+            if not item["passed"]:
+                item["display_state"] = "failed"
+            elif cfg.get("passive", False) and not has_action_progress:
+                item["display_state"] = "waiting"
+                item["message"] = "前置狀態符合（待主要步驟完成後確認）"
+            else:
+                item["display_state"] = "passed"
+        return results
 
     def run_one(
         self,
@@ -37,16 +48,20 @@ class CheckEngine:
         baseline: dict[str, str] | None = None,
         context: dict | None = None,
     ) -> dict:
+        ctx = context or {}
+        exam = self._is_exam(ctx)
         try:
-            passed, success, failure = self._evaluate(repo, check, baseline or {}, context or {})
+            passed, success, failure = self._evaluate(repo, check, baseline or {}, ctx)
             message = success if passed else failure
         except (GitError, OSError, ValueError, re.error) as exc:
             passed = False
             message = f"無法完成檢查：{exc}"
+        label = check.get("exam_label") if (exam and check.get("exam_label")) else check["label"]
         return {
             "check_id": check["id"],
             "passed": passed,
-            "label": check["label"],
+            "display_state": "passed" if passed else "failed",
+            "label": label,
             "message": message,
             "required": check.get("required", True),
         }
@@ -72,9 +87,23 @@ class CheckEngine:
             return None, missing_key
         return resolved, None
 
+    def _new_reflog_entries(self, repo: Path, baseline: dict[str, str]) -> list[str]:
+        res = self.git.run(repo, "reflog", "--format=%gs", check=False)
+        if res.returncode != 0 or not res.stdout:
+            return []
+        lines = [line for line in res.stdout.splitlines() if line]
+        raw_base = baseline.get("reflog_count")
+        if raw_base is not None and raw_base != "":
+            try:
+                base_count = max(0, int(raw_base))
+            except ValueError:
+                base_count = 0
+            return lines[: max(0, len(lines) - base_count)]
+        return lines
+
     def _read_content(self, repo: Path, check: dict, baseline: dict[str, str]) -> tuple[bool, str, str | None]:
         if check.get("revision"):
-            revision, missing = self._resolve_ref(str(check["revision"]), baseline)
+            revision, _ = self._resolve_ref(str(check["revision"]), baseline)
             if revision is None:
                 return False, "", "缺少伺服器端基準紀錄，請重設本題後再試"
             result = self.git.run(repo, "show", f"{revision}:{check['file']}", check=False)
@@ -154,6 +183,12 @@ class CheckEngine:
                 return False, "", "缺少起始基準紀錄，請重設本題後再試"
             res = self.git.run(repo, "rev-list", "--count", range_expr, check=False)
             if res.returncode != 0:
+                if "{baseline:remote_pending_main}" in check["range"]:
+                    return False, "", (
+                        "尚未同步遠端最新 commit，無法驗證整合後的 commit 數量"
+                        if exam
+                        else "本機尚未取得遠端最新 commit，請先按「模擬遠端 main 更新」並執行 git fetch origin"
+                    )
                 return False, "", "無法計算指定範圍的 commit 數量，請確認分支與基準是否正確"
             actual = int(res.stdout)
             target = int(expected)
@@ -229,7 +264,7 @@ class CheckEngine:
             if not exists:
                 return False, "", f"找不到檔案 {check['file']}"
             has_markers = any(
-                line.startswith(self.CONFLICT_PREFIXES)
+                line.lstrip().startswith(self.CONFLICT_PREFIXES)
                 for line in actual.replace("\r\n", "\n").splitlines()
             )
             if not has_markers:
@@ -276,7 +311,7 @@ class CheckEngine:
             if actual == target:
                 return True, "暫存紀錄狀態正確", ""
             hint = "" if exam else "；請確認使用 git stash pop 取出並移除暫存"
-            return False, "", f"目前仍有 {actual} 筆 stash 紀錄，需要清理為 {target} 筆{hint}"
+            return False, "", f"目前仍有 {actual} 筆暫存紀錄，需要清理為 {target} 筆{hint}"
 
         if kind == "no_operation_in_progress":
             git_dir = Path(self.git.run(repo, "rev-parse", "--absolute-git-dir").stdout)
@@ -289,6 +324,8 @@ class CheckEngine:
             active = next((label for marker, label in op_map if (git_dir / marker).exists()), None)
             if active is None:
                 return True, "沒有進行中的 Git 操作", ""
+            if exam:
+                return False, "", "仍有尚未完成或取消的 Git 操作"
             return False, "", f"仍有未完成的 {active} 操作，請先完成（--continue）或取消（--abort）"
 
         if kind == "ref_equals":
@@ -306,11 +343,19 @@ class CheckEngine:
                 return True, "分支／遠端追蹤版本正確", ""
             if ref_name == "refs/remotes/origin/main":
                 if not context.get("remote_updated"):
-                    return False, "", "尚未按下「模擬遠端 main 更新」並執行 git fetch origin"
-                return False, "", "遠端 main 已有新 commit，但本機 origin/main 尚未更新，請執行 git fetch origin"
+                    return False, "", (
+                        "尚未建立模擬遠端更新，或本機尚未同步遠端狀態"
+                        if exam
+                        else "尚未按下「模擬遠端 main 更新」並執行 git fetch origin"
+                    )
+                return False, "", (
+                    "模擬遠端 main 已有更新，但本機 origin/main 尚未同步"
+                    if exam
+                    else "遠端 main 已有新 commit，但本機 origin/main 尚未更新，請執行 git fetch origin"
+                )
             if ref_name == "refs/heads/main":
                 return False, "", "main 分支指向的 commit 已被移動，請保持 main 在題目起始位置"
-            return False, "", f"{ref_name} 目前指向 {actual_sha[:7]}，與預期（{expected_ref[:7]}）不符"
+            return False, "", f"{ref_name} 目前指向 {actual_sha[:7]}，與預期狀態不符"
 
         if kind in {"is_ancestor", "not_is_ancestor"}:
             anc_raw = str(check["ancestor"])
@@ -323,7 +368,11 @@ class CheckEngine:
             result = self.git.run(repo, "merge-base", "--is-ancestor", anc, desc, check=False)
             if result.returncode not in {0, 1}:
                 if uses_baseline:
-                    return False, "", "本機尚未取得遠端最新 commit，請先按「模擬遠端 main 更新」並執行 git fetch origin"
+                    return False, "", (
+                        "尚未取得遠端最新的更新"
+                        if exam
+                        else "尚未取得遠端更新，請先按「模擬遠端 main 更新」並執行 git fetch origin"
+                    )
                 detail = result.stderr or result.stdout or "指定的 revision 不存在"
                 raise GitError(detail)
             is_ancestor = result.returncode == 0
@@ -331,36 +380,68 @@ class CheckEngine:
             if passed:
                 return True, "Commit 關係符合要求", ""
             if kind == "is_ancestor":
-                short = anc[:7] if len(anc) == 40 else anc
-                return False, "", f"目前分支尚未基於最新的 {short}，請先完成 fetch 與 rebase"
+                if uses_baseline:
+                    return False, "", (
+                        "目前分支尚未基於最新的遠端 main"
+                        if exam
+                        else "目前分支尚未基於最新的遠端 main，請先同步並進行 rebase"
+                    )
+                return False, "", f"目前分支尚未基於最新的 {anc}"
+            if exam:
+                return False, "", f"來源分支 {anc} 已成為目前分支的祖先，違反不可合併整個分支的限制"
             return False, "", f"偵測到來源分支 {anc} 已成為目前分支的祖先（請改用 cherry-pick，不可 merge）"
 
         if kind == "no_merge_commit":
             range_expr, _ = self._resolve_ref(check["range"], baseline)
             if range_expr is None:
-                return False, "", "缺少遠端更新基準紀錄，請先建立遠端更新並 fetch"
+                return False, "", "缺少遠端更新基準紀錄，請重設本題後再試"
             res = self.git.run(repo, "rev-list", "--merges", range_expr, check=False)
             if res.returncode != 0:
-                return False, "", "本機尚未取得遠端最新 commit，請先執行 git fetch origin"
+                return False, "", (
+                    "尚未取得遠端最新更新，無法驗證整合歷史"
+                    if exam
+                    else "本機尚未取得遠端最新 commit，請先執行 git fetch origin"
+                )
             if res.stdout == "":
                 return True, "沒有多餘的 merge commit", ""
+            if exam:
+                return False, "", "偵測到不符合限制的 merge commit，請保持線性提交歷史"
             return False, "", "偵測到 merge commit；本題必須使用 rebase 完成整合，不可使用 merge"
 
-        if kind in {"reflog_contains", "reflog_contains_action"}:
-            output = self.git.run(repo, "reflog", "--format=%gs", check=False).stdout
-            if str(expected) in output:
-                success_msg = "已完成指定的 Git 操作紀錄" if kind == "reflog_contains_action" else "已完成指定的分支切換"
-                return True, success_msg, ""
-            if kind == "reflog_contains_action":
-                exp = str(expected)
-                if "amend" in exp:
-                    return False, "", "在操作紀錄中未找到 commit (amend)，請使用 git commit --amend 更新最新 commit"
-                if "rebase" in exp:
-                    return False, "", "在操作紀錄中未找到完成的 rebase 紀錄，請使用 git rebase"
-                if "cherry-pick" in exp:
-                    return False, "", "在操作紀錄中未找到 cherry-pick 紀錄，請使用 git cherry-pick 套用修正"
-                return False, "", f"在 reflog 中尚未看到指定操作（{exp}）"
-            return False, "", f"在 reflog 中尚未看到切換至 {expected} 的紀錄"
+        if kind == "reflog_checkout_to":
+            entries = self._new_reflog_entries(repo, baseline)
+            target_branch = str(expected)
+            matched = any(
+                line.startswith("checkout: moving from ") and line.endswith(f" to {target_branch}")
+                for line in entries
+            )
+            if matched:
+                return True, f"已完成切換至 {target_branch} 分支", ""
+            if exam:
+                return False, "", f"操作紀錄中尚未偵測到實際切換至 {target_branch} 分支的動作"
+            return False, "", f"尚未在操作紀錄中看到切換至 {target_branch}（請先暫存草稿再實際切換過去查看）"
+
+        if kind == "reflog_contains_action":
+            entries = self._new_reflog_entries(repo, baseline)
+            exp = str(expected)
+            prefix = exp if exp.endswith(":") else f"{exp}:"
+            if any(line.startswith(prefix) for line in entries):
+                return True, "已完成指定的 Git 操作紀錄", ""
+            if exam:
+                return False, "", "操作紀錄中尚未偵測到符合本題限制的操作方式"
+            if "amend" in exp:
+                return False, "", "在操作紀錄中未找到 commit (amend)，請使用 git commit --amend 更新最新 commit"
+            if "rebase" in exp:
+                return False, "", "在操作紀錄中未找到完成的 rebase 紀錄，請使用 git rebase"
+            if "cherry-pick" in exp:
+                return False, "", "在操作紀錄中未找到 cherry-pick 紀錄，請使用 git cherry-pick 套用修正"
+            return False, "", f"在操作紀錄中尚未看到指定動作（{exp}）"
+
+        if kind == "reflog_contains":
+            entries = self._new_reflog_entries(repo, baseline)
+            if any(str(expected) in line for line in entries):
+                return True, "已完成指定的分支切換", ""
+            return False, "", f"在操作紀錄中尚未看到切換至 {expected} 的紀錄"
 
         if kind == "patch_equivalent":
             expected_pid, _ = self._resolve_ref(str(expected), baseline)
@@ -376,6 +457,8 @@ class CheckEngine:
             actual_pid = pid_res.stdout.split()[0] if pid_res.stdout else ""
             if actual_pid == expected_pid:
                 return True, "Commit patch 與來源修正一致", ""
+            if exam:
+                return False, "", "最新 commit 的變更內容與目標修正不一致"
             return False, "", "最新 commit 的變更內容（patch）與指定修正 commit 不一致，請使用 cherry-pick 套用"
 
         raise ValueError(f"不支援的檢查類型：{kind}")
@@ -455,7 +538,6 @@ class CheckEngine:
                 return False, "", f"找不到 {wanted}，不可刪除或移動該檔案"
             return False, "", f"{wanted} 已被追蹤或提交，必須保持為未追蹤檔案"
 
-        # working_tree_modified: require unstaged modification (" M"), not staged ("M ") or deleted (" D"/"D ")
         if any(row[0] == " " and row[1] == "M" for row in matched_rows):
             return True, "Working tree 狀態正確", ""
         if matched_rows:

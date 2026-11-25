@@ -23,10 +23,10 @@
       "checks": [
         {"id": "message", "type": "commit_message", "expected": "Fix configuration loading", "label": "Commit message 正確"},
         {"id": "config-in-commit", "type": "file_in_commit", "file": "src/config.py", "after": "{baseline:assessment_start}", "label": "src/config.py 已加入新 commit"},
-        {"id": "readme-modified", "type": "working_tree_modified", "file": "README.md", "label": "README.md 保留為未提交修改"},
-        {"id": "readme-not-commit", "type": "file_not_in_commit", "file": "README.md", "after": "{baseline:assessment_start}", "label": "README.md 未加入 commit"},
-        {"id": "debug-untracked", "type": "untracked_file", "file": "debug.log", "label": "debug.log 仍為未追蹤檔案"},
-        {"id": "debug-not-commit", "type": "file_not_in_commit", "file": "debug.log", "after": "{baseline:assessment_start}", "label": "debug.log 未加入 commit"},
+        {"id": "readme-modified", "type": "working_tree_modified", "file": "README.md", "passive": true, "label": "README.md 保留為未提交修改"},
+        {"id": "readme-not-commit", "type": "file_not_in_commit", "file": "README.md", "after": "{baseline:assessment_start}", "passive": true, "label": "README.md 未加入 commit"},
+        {"id": "debug-untracked", "type": "untracked_file", "file": "debug.log", "passive": true, "label": "debug.log 仍為未追蹤檔案"},
+        {"id": "debug-not-commit", "type": "file_not_in_commit", "file": "debug.log", "after": "{baseline:assessment_start}", "passive": true, "label": "debug.log 未加入 commit"},
         {"id": "single-commit", "type": "commit_count", "range": "{baseline:assessment_start}..HEAD", "expected": 1, "label": "只建立一筆 commit"}
       ]
     },
@@ -35,7 +35,7 @@
       "order": 2,
       "title": "將遺漏的測試補進最新 Commit",
       "description": "目前最新的一筆 commit 已包含程式修改，但漏掉了 tests/test_config.py。請先把測試檔改成題目提供的內容，再更新原本的最新 commit；完成後仍然只能有原來那一筆 commit。",
-      "exam_goal": "將 tests/test_config.py 修改為下方程式碼並併入目前的最新 commit（保留原本 Commit message：Fix configuration loading）。不可新增第二筆 commit，完成後 working tree 必須乾淨。",
+      "exam_goal": "將 tests/test_config.py 修改為題目提供的測試內容並併入目前的最新 commit（保留原本 Commit message：Fix configuration loading）。不可新增第二筆 commit，完成後 working tree 必須乾淨。",
       "instructions": [
         "將 tests/test_config.py 完整修改為下方提供的內容，讓測試確認 production config path",
         "把 tests/test_config.py 加入 staging area（暫存區）",
@@ -58,13 +58,13 @@
       "constraints": ["不可另外建立新 commit，也不可更改指定的 Commit message"],
       "repository_template": "task02",
       "checks": [
-        {"id": "message", "type": "commit_message", "expected": "Fix configuration loading", "label": "Commit message 保持不變"},
-        {"id": "config-in-commit", "type": "file_in_commit", "file": "src/config.py", "label": "最新 commit 包含 src/config.py"},
+        {"id": "message", "type": "commit_message", "expected": "Fix configuration loading", "passive": true, "label": "Commit message 保持不變"},
+        {"id": "config-in-commit", "type": "file_in_commit", "file": "src/config.py", "passive": true, "label": "最新 commit 包含 src/config.py"},
         {"id": "test-in-commit", "type": "file_in_commit", "file": "tests/test_config.py", "label": "最新 commit 包含測試檔案"},
         {"id": "test-content", "type": "file_at_revision_contains", "revision": "HEAD", "file": "tests/test_config.py", "expected": "CONFIG_PATH == \"config/production.json\"", "label": "測試內容已包含在 commit"},
-        {"id": "single-commit", "type": "commit_count", "range": "{baseline:assessment_start}..HEAD", "expected": 1, "label": "沒有增加額外 commit"},
-        {"id": "used-amend", "type": "reflog_contains_action", "expected": "commit (amend)", "label": "使用 amend 更新原本的 commit"},
-        {"id": "clean", "type": "working_tree_clean", "label": "Working tree 乾淨"}
+        {"id": "single-commit", "type": "commit_count", "range": "{baseline:assessment_start}..HEAD", "expected": 1, "passive": true, "label": "沒有增加額外 commit"},
+        {"id": "used-amend", "type": "reflog_contains_action", "expected": "commit (amend)", "label": "使用 amend 更新原本的 commit", "exam_label": "以更新原本 commit 的方式補入測試"},
+        {"id": "clean", "type": "working_tree_clean", "passive": true, "label": "Working tree 乾淨"}
       ]
     },
     {
@@ -89,9 +89,9 @@
         {"id": "branch", "type": "current_branch", "expected": "feature/login-timeout", "label": "目前位於指定工作分支"},
         {"id": "timeout", "type": "file_at_revision_contains", "revision": "HEAD", "file": "src/login.py", "expected": "LOGIN_TIMEOUT = 60", "label": "Timeout 修改已包含在 commit"},
         {"id": "message", "type": "commit_message", "expected": "Update login timeout", "label": "Commit message 正確"},
-        {"id": "main-unchanged", "type": "ref_equals", "ref": "refs/heads/main", "expected": "{baseline:main}", "label": "main 維持原本位置與內容"},
+        {"id": "main-unchanged", "type": "ref_equals", "ref": "refs/heads/main", "expected": "{baseline:main}", "passive": true, "label": "main 維持原本位置與內容"},
         {"id": "single-commit", "type": "commit_count", "range": "{baseline:main}..HEAD", "expected": 1, "label": "工作分支只有本題 commit"},
-        {"id": "clean", "type": "working_tree_clean", "label": "Working tree 乾淨"}
+        {"id": "clean", "type": "working_tree_clean", "passive": true, "label": "Working tree 乾淨"}
       ]
     },
     {
@@ -99,7 +99,7 @@
       "order": 4,
       "title": "Fetch 遠端更新並用 Rebase 解決 Conflict",
       "description": "你目前在 feature/login-timeout，分支上已有自己的修改。另一位開發者會更新遠端 main，而且雙方都修改了 src/login.py。請先用題目按鈕建立遠端更新，再回到 Terminal 執行 fetch，最後把目前分支 rebase 到最新的 origin/main，並手動整合雙方需要保留的設定。",
-      "exam_goal": "點擊「模擬遠端 main 更新」產生遠端新 commit 後，在 Terminal 同步遠端 origin/main，並將 feature/login-timeout 以 rebase（不可 merge）方式整合至最新 origin/main；解決 src/login.py 衝突以同時保留 LOGIN_TIMEOUT = 60 與 LOGIN_RETRY = 5，且清除所有衝突標記。",
+      "exam_goal": "點擊「模擬遠端 main 更新」產生遠端新 commit 後，在 Terminal 同步遠端 origin/main，並將 feature/login-timeout 以線性整合（不可 merge）方式套用到最新 origin/main；解決 src/login.py 衝突以同時保留 LOGIN_TIMEOUT = 60 與 LOGIN_RETRY = 5，且清除所有衝突標記與舊設定值。",
       "instructions": [
         "確認目前位於 feature/login-timeout，而且 working tree 沒有尚未提交的修改",
         "在題目頁按下「模擬遠端 main 更新」，讓新 commit 只出現在模擬的遠端 main",
@@ -116,30 +116,32 @@
       ],
       "remote_update_action": {
         "button_label": "模擬遠端 main 更新",
-        "description": "這個按鈕只會在模擬的遠端 main 建立新 commit，不會自動更新目前 repository 的 origin/main，也不會修改你的工作分支。按下後請回到 Terminal 執行 fetch，再進行 rebase。"
+        "description": "這個按鈕只會在模擬的遠端 main 建立新 commit，不會自動更新目前 repository 的 origin/main，也不會修改你的工作分支。按下後請回到 Terminal 執行 fetch，再進行 rebase。",
+        "exam_description": "這個按鈕只會在模擬的遠端 main 建立新 commit，不會自動更新目前 repository 的 origin/main，也不會修改你的工作分支。按下後請回到 Terminal 同步遠端變更並完成整合。"
       },
       "constraints": ["必須使用 rebase 完成整合，不可用 merge 或 merge commit 取代；不可省略 fetch"],
       "repository_template": "task04",
       "checks": [
-        {"id": "branch", "type": "current_branch", "expected": "feature/login-timeout", "label": "目前位於工作分支"},
-        {"id": "remote-fetched", "type": "ref_equals", "ref": "refs/remotes/origin/main", "expected": "{baseline:remote_pending_main}", "label": "已透過 fetch 取得遠端 main 最新更新"},
+        {"id": "branch", "type": "current_branch", "expected": "feature/login-timeout", "passive": true, "label": "目前位於工作分支"},
+        {"id": "remote-fetched", "type": "ref_equals", "ref": "refs/remotes/origin/main", "expected": "{baseline:remote_pending_main}", "label": "已透過 fetch 取得遠端 main 最新更新", "exam_label": "已同步遠端 main 最新更新"},
         {"id": "main-ancestor", "type": "is_ancestor", "ancestor": "{baseline:remote_pending_main}", "descendant": "HEAD", "label": "工作分支已基於最新 origin/main"},
-        {"id": "no-conflict-markers", "type": "no_conflict_markers", "file": "src/login.py", "label": "已清除所有 conflict 標記"},
-        {"id": "timeout", "type": "file_matches", "file": "src/login.py", "expected": "^LOGIN_TIMEOUT\\s*=\\s*60$", "label": "Timeout 保留為 60"},
+        {"id": "single-commit", "type": "commit_count", "range": "{baseline:remote_pending_main}..HEAD", "expected": 1, "label": "Rebase 後工作分支只保留原本的 1 筆 commit", "exam_label": "整合後工作分支只保留原本的 1 筆 commit"},
+        {"id": "no-conflict-markers", "type": "no_conflict_markers", "file": "src/login.py", "passive": true, "label": "已清除所有 conflict 標記"},
+        {"id": "timeout", "type": "file_matches", "file": "src/login.py", "expected": "^LOGIN_TIMEOUT\\s*=\\s*60$", "passive": true, "label": "Timeout 保留為 60"},
         {"id": "retry", "type": "file_matches", "file": "src/login.py", "expected": "^LOGIN_RETRY\\s*=\\s*5$", "label": "已保留 main 的最新 retry 設定"},
-        {"id": "no-stale-values", "type": "file_not_contains", "file": "src/login.py", "regex": true, "expected": "^(LOGIN_TIMEOUT\\s*=\\s*45|LOGIN_RETRY\\s*=\\s*3)$", "label": "未殘留衝突前的舊設定值"},
-        {"id": "no-merge", "type": "no_merge_commit", "range": "{baseline:remote_pending_main}..HEAD", "label": "沒有使用 merge commit"},
-        {"id": "used-rebase", "type": "reflog_contains_action", "expected": "rebase (finish)", "label": "使用 rebase 完成整合"},
-        {"id": "clean", "type": "working_tree_clean", "label": "Working tree 乾淨"},
-        {"id": "operation", "type": "no_operation_in_progress", "label": "Rebase 已完整結束"}
+        {"id": "no-stale-values", "type": "file_not_contains", "file": "src/login.py", "regex": true, "expected": "(LOGIN_TIMEOUT\\s*=\\s*45|LOGIN_RETRY\\s*=\\s*3)", "passive": true, "label": "未殘留衝突前的舊設定值"},
+        {"id": "no-merge", "type": "no_merge_commit", "range": "{baseline:remote_pending_main}..HEAD", "passive": true, "label": "沒有使用 merge commit"},
+        {"id": "used-rebase", "type": "reflog_contains_action", "expected": "rebase (finish)", "label": "使用 rebase 完成整合", "exam_label": "以線性整合方式完成更新"},
+        {"id": "clean", "type": "working_tree_clean", "passive": true, "label": "Working tree 乾淨"},
+        {"id": "operation", "type": "no_operation_in_progress", "passive": true, "label": "Rebase 已完整結束", "exam_label": "整合操作已完整結束"}
       ]
     },
     {
       "id": "task05",
       "order": 5,
       "title": "用 Stash 暫存修改並查看遠端分支",
-      "description": "你目前在 feature/login-timeout，notes/development.md 有一份不能提交但必須保留的草稿。遠端 origin 另有 hotfix/check-status，本機還看不到對應分支。請先用 stash 暫時收起草稿，再取得並切換到 hotfix/check-status 分支查看修正，最後回到原分支恢復草稿。",
-      "exam_goal": "在不提交草稿的前提下暫存 notes/development.md 的修改，從 origin 取得並建立本機追蹤分支 hotfix/check-status 並切換查看後，回到 feature/login-timeout 恢復草稿且不留下任何 stash 紀錄。",
+      "description": "你目前在 feature/login-timeout，notes/development.md 有一份不能提交但必須保留的草稿。遠端 origin 另有 hotfix/check-status（同樣異動了 notes/development.md），本機還看不到對應分支。請先用 stash 暫時收起草稿，再取得並切換到 hotfix/check-status 分支查看修正，最後回到原分支恢復草稿。",
+      "exam_goal": "在不提交草稿的前提下先妥善暫存 notes/development.md 的未提交修改，從 origin 取得並建立本機追蹤分支 hotfix/check-status 後實際切換過去查看，再回到 feature/login-timeout 恢復原本草稿且不留下任何暫存紀錄。",
       "instructions": [
         "先查看狀態，確認 notes/development.md 是未提交修改",
         "不要建立 commit；使用 stash 暫時保存目前修改，讓 working tree 可以安全切換分支",
@@ -151,20 +153,20 @@
         "最後確認 notes/development.md 再次顯示為未提交修改，而且 git stash list 完全沒有輸出"
       ],
       "hints": [
-        "先用 git stash push 暫存目前工作目錄的未提交修改。",
+        "先用 git stash push 暫存目前工作目錄的未提交修改（若不暫存，切換到 hotfix 分支時會因 notes/development.md 衝突而被拒絕）。",
         "執行 git fetch origin 後，用 git switch --track origin/hotfix/check-status（或 git checkout -b hotfix/check-status origin/hotfix/check-status）建立並切換追蹤分支。",
         "查看完成後執行 git switch feature/login-timeout，再用 git stash pop 取出草稿並自動清除該筆 stash（不要只用 stash apply）。"
       ],
       "constraints": ["不可把草稿建立成 commit；完成後必須回到 feature/login-timeout、恢復草稿，且不可留下任何 stash 紀錄"],
       "repository_template": "task05",
       "checks": [
-        {"id": "branch", "type": "current_branch", "expected": "feature/login-timeout", "label": "已回到原本工作分支"},
-        {"id": "notes-modified", "type": "working_tree_modified", "file": "notes/development.md", "label": "未完成修改已恢復"},
-        {"id": "notes-content", "type": "file_contains", "file": "notes/development.md", "expected": "DRAFT: investigate login timeout behavior.", "label": "草稿內容完整保留"},
+        {"id": "branch", "type": "current_branch", "expected": "feature/login-timeout", "passive": true, "label": "已回到原本工作分支"},
+        {"id": "notes-modified", "type": "working_tree_modified", "file": "notes/development.md", "passive": true, "label": "未完成修改已恢復"},
+        {"id": "notes-content", "type": "file_contains", "file": "notes/development.md", "expected": "DRAFT: investigate login timeout behavior.", "passive": true, "label": "草稿內容完整保留"},
         {"id": "hotfix-branch", "type": "branch_tracks_remote", "expected": "hotfix/check-status", "remote": "origin", "label": "已建立本機 hotfix/check-status 追蹤分支"},
         {"id": "hotfix-updated", "type": "file_at_revision_contains", "revision": "hotfix/check-status", "file": "src/status.py", "expected": "STATUS = \"healthy\"", "label": "hotfix/check-status 分支包含遠端最新修正"},
-        {"id": "stash-empty", "type": "stash_count", "expected": 0, "label": "git stash list 沒有任何紀錄"},
-        {"id": "switched-back", "type": "reflog_contains", "expected": "to hotfix/check-status", "label": "已完成切換至 hotfix 分支並回到原分支"}
+        {"id": "stash-empty", "type": "stash_count", "expected": 0, "passive": true, "label": "git stash list 沒有任何紀錄", "exam_label": "暫存區紀錄已清空"},
+        {"id": "switched-back", "type": "reflog_checkout_to", "expected": "hotfix/check-status", "label": "已完成切換至 hotfix 分支並回到原分支", "exam_label": "已實際切換查看遠端修正分支並回到原分支"}
       ]
     },
     {
@@ -188,16 +190,16 @@
       "constraints": ["只能 cherry-pick 指定的一筆 commit，不可 merge、rebase 或直接合併整個 fix/validation 分支"],
       "repository_template": "task06",
       "checks": [
-        {"id": "branch", "type": "current_branch", "expected": "feature/login-timeout", "label": "目前位於工作分支"},
+        {"id": "branch", "type": "current_branch", "expected": "feature/login-timeout", "passive": true, "label": "目前位於工作分支"},
         {"id": "content", "type": "file_contains", "file": "src/validator.py", "expected": "value.strip() != \"\"", "label": "驗證修正已套用"},
-        {"id": "no-unrelated-file", "type": "file_not_exists", "file": "notes/validator_todo.md", "label": "未帶入來源分支的不相關檔案"},
+        {"id": "no-unrelated-file", "type": "file_not_exists", "file": "notes/validator_todo.md", "passive": true, "label": "未帶入來源分支的不相關檔案"},
         {"id": "message", "type": "commit_message", "expected": "Reject empty validation values", "label": "對應 commit 已建立"},
         {"id": "single-commit", "type": "commit_count", "range": "{baseline:assessment_start}..HEAD", "expected": 1, "label": "只增加指定的一筆 commit"},
-        {"id": "not-merged", "type": "not_is_ancestor", "ancestor": "fix/validation", "descendant": "HEAD", "label": "未合併整個來源分支"},
-        {"id": "used-cherry-pick", "type": "reflog_contains_action", "expected": "cherry-pick", "label": "使用 cherry-pick 套用修正"},
+        {"id": "not-merged", "type": "not_is_ancestor", "ancestor": "fix/validation", "descendant": "HEAD", "passive": true, "label": "未合併整個來源分支"},
+        {"id": "used-cherry-pick", "type": "reflog_contains_action", "expected": "cherry-pick", "label": "使用 cherry-pick 套用修正", "exam_label": "以單一 commit 套用方式帶入修正"},
         {"id": "patch-match", "type": "patch_equivalent", "expected": "{baseline:fix_validation_patch_id}", "label": "Commit 變更內容與目標修正一致"},
-        {"id": "clean", "type": "working_tree_clean", "label": "Working tree 乾淨"},
-        {"id": "operation", "type": "no_operation_in_progress", "label": "沒有未完成的套用操作"}
+        {"id": "clean", "type": "working_tree_clean", "passive": true, "label": "Working tree 乾淨"},
+        {"id": "operation", "type": "no_operation_in_progress", "passive": true, "label": "沒有未完成的套用操作"}
       ]
     }
   ]

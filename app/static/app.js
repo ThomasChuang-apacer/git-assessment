@@ -102,6 +102,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (nameError && !nameError.hidden && nameInput.value.trim()) {
       nameError.hidden = true;
       nameError.textContent = "";
+      nameInput.removeAttribute("aria-invalid");
     }
   });
   startForm?.addEventListener("submit", (event) => {
@@ -113,6 +114,7 @@ document.addEventListener("DOMContentLoaded", () => {
           nameError.textContent = "請輸入姓名或識別代碼（不能只有空白字元）。";
           nameError.hidden = false;
         }
+        nameInput.setAttribute("aria-invalid", "true");
         nameInput.focus();
         return;
       }
@@ -122,9 +124,11 @@ document.addEventListener("DOMContentLoaded", () => {
           nameError.textContent = "姓名或識別代碼不可超過 80 個字元。";
           nameError.hidden = false;
         }
+        nameInput.setAttribute("aria-invalid", "true");
         nameInput.focus();
         return;
       }
+      nameInput.removeAttribute("aria-invalid");
       nameInput.value = trimmed;
     }
     const button = startForm.querySelector('button[type="submit"]');
@@ -267,11 +271,13 @@ document.addEventListener("DOMContentLoaded", () => {
         `開始時間：${formatDateTime(summary.started_at)}`,
         `完成時間：${formatDateTime(summary.completed_at)}`,
         `總作答時間：${summary.duration_display}`,
-        `驗證碼：${summary.integrity_short}（${summary.integrity_ok ? "資料完整" : "驗證異常"}）`,
+        `校驗碼：${summary.integrity_short}（${summary.integrity_ok ? "檔案一致" : "檔案異動"}）`,
         "",
         ...summary.tasks.map((task) => {
           const st = task.status === "completed" ? "已完成" : task.status === "in_progress" ? "進行中" : "尚未完成";
-          return `0${task.order} ${task.title}：${st}（檢查 ${task.check_attempts} 次、重設 ${task.reset_count} 次）`;
+          const parts = [`檢查 ${task.check_attempts} 次`, `重設 ${task.reset_count} 次`];
+          if (task.repair_count) parts.push(`修復 ${task.repair_count} 次`);
+          return `0${task.order} ${task.title}：${st}（${parts.join("、")}）`;
         }),
       ];
       await navigator.clipboard.writeText(lines.join("\n"));
@@ -321,11 +327,13 @@ document.addEventListener("DOMContentLoaded", () => {
         70,
         256
       );
-      ctx.fillText(
-        `總作答時間：${summary.duration_display}　重設總計：${summary.total_resets || 0} 次　提示使用：${summary.total_hints || 0} 次`,
-        70,
-        286
-      );
+      const topSummaryParts = [
+        `總作答時間：${summary.duration_display}`,
+        `重設總計：${summary.total_resets || 0} 次`,
+      ];
+      if (summary.total_repairs) topSummaryParts.push(`修復總計：${summary.total_repairs} 次`);
+      topSummaryParts.push(`提示使用：${summary.total_hints || 0} 次`);
+      ctx.fillText(topSummaryParts.join("　"), 70, 286);
 
       ctx.fillStyle = "#0f2f46";
       ctx.fillRect(895, 80, 235, 170);
@@ -353,6 +361,7 @@ document.addEventListener("DOMContentLoaded", () => {
         ctx.font = "500 17px 'Microsoft JhengHei', sans-serif";
         ctx.fillStyle = "#5b6570";
         const metaParts = [`檢查次數：${task.check_attempts}`, `重設次數：${task.reset_count || 0}`];
+        if (task.repair_count) metaParts.push(`修復：${task.repair_count} 次`);
         if (completed && task.duration_display && task.duration_display !== "—") {
           metaParts.push(`耗時：${task.duration_display}`);
         }
@@ -367,7 +376,7 @@ document.addEventListener("DOMContentLoaded", () => {
       ctx.font = "500 15px 'Microsoft JhengHei', sans-serif";
       ctx.fillStyle = "#5b6570";
       ctx.fillText(
-        `Session: ${summary.session_id} · 驗證碼：${summary.integrity_short || "無"}（${summary.integrity_ok ? "資料完整" : "異常"}）`,
+        `Session: ${summary.session_id} · 校驗碼：${summary.integrity_short || "無"}（${summary.integrity_ok ? "檔案一致" : "檔案異動"}）`,
         70,
         height - 28
       );
@@ -397,6 +406,7 @@ document.addEventListener("DOMContentLoaded", () => {
   if (!shell) return;
   const sessionId = shell.dataset.sessionId;
   const taskId = shell.dataset.taskId;
+  const isExamMode = shell.dataset.mode === "exam";
   const message = document.getElementById("action-message");
 
   const post = async (action, jsonBody = null) => {
@@ -418,15 +428,19 @@ document.addEventListener("DOMContentLoaded", () => {
     return payload;
   };
 
+  const checkDisplayState = (check) => check.display_state || (check.passed ? "passed" : "failed");
+
   const renderChecks = (checks) => {
     const list = document.getElementById("check-list");
     list.innerHTML = "";
     checks.forEach((check) => {
+      const dstate = checkDisplayState(check);
       const row = document.createElement("div");
-      row.className = `check-item ${check.passed ? "passed" : "failed"}`;
+      row.className = `check-item ${dstate}`;
       const symbol = document.createElement("span");
       symbol.className = "check-symbol";
-      symbol.textContent = check.passed ? "✓" : "✗";
+      symbol.setAttribute("aria-hidden", "true");
+      symbol.textContent = dstate === "passed" ? "✓" : dstate === "waiting" ? "·" : "✗";
       const copy = document.createElement("div");
       const title = document.createElement("strong");
       title.textContent = check.label;
@@ -456,7 +470,8 @@ document.addEventListener("DOMContentLoaded", () => {
     try {
       const result = await post("check");
       renderChecks(result.checks);
-      const passed = result.checks.filter((check) => check.passed).length;
+      const passed = result.checks.filter((check) => checkDisplayState(check) === "passed").length;
+      const failedCount = result.checks.filter((check) => checkDisplayState(check) === "failed").length;
       const summary = `${passed} / ${result.checks.length} 通過`;
       const summaryEl = document.getElementById("check-summary");
       const dockSummaryEl = document.getElementById("check-dock-summary");
@@ -487,9 +502,10 @@ document.addEventListener("DOMContentLoaded", () => {
       mainCheckButton?.classList.toggle("button-primary", !result.completed);
       mainCheckButton?.classList.toggle("button-secondary", result.completed);
       if (mainCheckButton) labels.set(mainCheckButton, result.completed ? "重新檢查" : "檢查結果");
+      const remaining = failedCount || (result.checks.length - passed);
       let text = result.completed
         ? "完成狀態已保存。"
-        : `還有 ${result.checks.length - passed} 項未通過，請依紅色項目的說明修正後再試。`;
+        : `還有 ${remaining} 項未通過，請依紅色項目的說明修正後再試。`;
       if (result.all_completed) text = "全部任務都完成了！可點擊「查看／保存結果」下載成績單。";
       setInlineMessage(message, text, result.completed ? "success" : "notice");
 
@@ -530,17 +546,35 @@ document.addEventListener("DOMContentLoaded", () => {
         button.setAttribute("aria-expanded", "false");
         return;
       }
-      body.hidden = false;
-      button.setAttribute("aria-expanded", "true");
-      button.textContent = `提示 ${idx + 1}（已檢視）`;
+      if (button.dataset.loaded === "yes" && body.textContent.trim()) {
+        body.hidden = false;
+        button.setAttribute("aria-expanded", "true");
+        return;
+      }
+      if (isExamMode) {
+        const confirmed = await askConfirm({
+          title: "確認展開提示？",
+          message: "考試模式下展開提示會記錄於測驗結果的提示使用次數中，確定要查看這條提示嗎？",
+          confirmLabel: "展開提示",
+        });
+        if (!confirmed) return;
+      }
+      button.disabled = true;
       try {
         const outcome = await post("hint", { hint_index: idx });
+        body.textContent = outcome.hint_text || "";
+        body.hidden = false;
+        button.dataset.loaded = "yes";
+        button.setAttribute("aria-expanded", "true");
+        button.textContent = `提示 ${idx + 1}（已檢視）`;
         const counter = document.getElementById("hints-used-count");
         if (counter && typeof outcome.hints_used === "number") {
           counter.textContent = outcome.hints_used;
         }
-      } catch {
-        // Keep the hint visible locally even if tracking fails transiently.
+      } catch (error) {
+        setInlineMessage(message, error.message || "無法載入提示", "error");
+      } finally {
+        button.disabled = false;
       }
     });
   });
@@ -571,9 +605,14 @@ document.addEventListener("DOMContentLoaded", () => {
     setInlineMessage(remoteMessage, "正在更新模擬遠端…", "");
     try {
       const result = await post("remote-update");
-      setInlineMessage(remoteMessage, result.updated
-        ? "遠端 main 已更新。提示：遠端資料更新後，要先執行 git fetch origin，再觀察 origin/main 的變化。"
-        : "遠端 main 已經是最新模擬狀態。請先執行 git fetch origin，再處理分支整合。", "success");
+      const msg = isExamMode
+        ? (result.updated
+            ? "遠端 main 已更新，請回 Terminal 同步遠端變更並完成整合。"
+            : "遠端 main 已經是最新模擬狀態，請回 Terminal 同步並完成整合。")
+        : (result.updated
+            ? "遠端 main 已更新。提示：遠端資料更新後，要先執行 git fetch origin，再觀察 origin/main 的變化。"
+            : "遠端 main 已經是最新模擬狀態。請先執行 git fetch origin，再處理分支整合。");
+      setInlineMessage(remoteMessage, msg, "success");
       button.textContent = "遠端更新已建立";
     } catch (error) {
       setInlineMessage(remoteMessage, error.message, "error");

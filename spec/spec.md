@@ -1,8 +1,8 @@
 # Git 實作考試系統規格書
 
-文件版本：1.4
+文件版本：1.5
 文件狀態：Current Implementation
-更新日期：2026-11-24
+更新日期：2026-11-25
 
 ## 1. 文件目的
 
@@ -28,8 +28,8 @@
 - 六題彼此獨立，互不影響。
 - 支援「練習模式」（逐步步驟與操作線索）與「考試模式」（僅目標與限制，提示另計次數）。
 - 判題基準（起始 SHA、原始分支 SHA、模擬遠端目標 SHA、patch-id）由伺服器端保存於結果 JSON，防止竄改 repository ref 繞過檢查。
-- 結果摘要記錄完整時間軸、檢查累計次數、重設次數與 SHA-256 完整性雜湊。
-- 支援選擇性的共用考場「考官模式」（`GIT_ASSESSMENT_EXAMINER_PIN`）保護受測者隱私與危險操作。
+- 結果摘要記錄完整時間軸、檢查累計次數、重設／修復次數與 SHA-256 檔案一致性校驗碼。
+- 支援選擇性的共用考場「考官模式」（透過環境變數 `GIT_ASSESSMENT_EXAMINER_PIN` 或設定檔 `runtime/examiner.json`）保護受測者隱私與危險操作。
 - 題目操作不需要連線至公司 Git、GitHub 或 Gerrit；支援預先打包離線 `wheels/` 安裝。
 
 ### 2.2 非目標
@@ -56,19 +56,20 @@
 
 啟動行為：
 
-1. 透過 `/api/health` 核對 `project_root`（`instance_id`）：若同一目錄已在執行，直接開啟瀏覽器；若端口被其他目錄的 Git Assessment 占用，則跳出警告避免誤連錯誤實例。
+1. `Start Git Assessment.vbs` 維持純 7-bit ASCII 英文（確保 Windows VBScript ANSI 編譯相容），並透過 `/api/health` 核對 `project_root`（`instance_id`）：若同一目錄已在執行，直接開啟瀏覽器；若端口被其他目錄的 Git Assessment 占用，則跳出警告避免誤連錯誤實例。
 2. 建立或驗證 `.venv`（若專案包含 `wheels/*.whl`，使用 `--no-index --find-links=wheels` 離線安裝）。
-3. 透過 `First Start Git Assessment.ps1`（支援 `FirstStart` 與 `Starting` 模式）顯示啟動進度視窗。
-4. 建立或驗證六題離線 Git templates（目前版本 `TemplateBuilder.VERSION = 8`）。
+3. 透過 `First Start Git Assessment.ps1`（UTF-8 BOM，支援 `FirstStart` 與 `Starting` 模式）顯示啟動進度視窗。
+4. 建立或驗證六題離線 Git templates（目前版本 `TemplateBuilder.VERSION = 9`，清空範本建置 reflog 並設定 `core.autocrlf=false`）。
 5. 啟動綁定於 `127.0.0.1` 的本機 Web Server（支援 `RotatingFileHandler` 自動去除 ANSI 控制碼）。
 
-可用環境變數：
+可用環境變數／設定檔：
 
-| 變數 | 用途 |
+| 來源 | 用途 |
 |---|---|
 | `GIT_ASSESSMENT_PORT` | 修改服務 port（預設 `8765`） |
 | `GIT_ASSESSMENT_NO_BROWSER=1` | 啟動後不自動開啟瀏覽器 |
-| `GIT_ASSESSMENT_EXAMINER_PIN` | 設定考官模式 PIN 碼；設定後啟用共用電腦隱私保護 |
+| `GIT_ASSESSMENT_EXAMINER_PIN` | 設定考官模式 PIN 碼（優先於設定檔）；設定後啟用共用電腦隱私保護 |
+| `runtime/examiner.json` | 選用設定檔 `{"pin": "..."}`，當未設定環境變數時自動讀取 |
 
 ## 4. 使用者與考官流程
 
@@ -81,34 +82,35 @@
 ### 4.2 任務總覽、題目頁與提示
 
 - 任務狀態分為 `not_started`、`in_progress`（已開啟或已檢查未通過）、`completed`。
-- 任務頁提供「複製路徑」、「開啟資料夾」、`? 如何開始`（含常見 Vim / `--no-edit` 卡關說明）、可展開的「操作提示（記錄檢視次數）」、「檢查結果」及「重設本題」。
-- 檢查失敗項目顯示受測者目前的實際狀態（目前分支、commit 數、訊息或未清理檔案等）。
+- 任務頁提供「複製路徑」、「開啟資料夾」、`? 如何開始`（含常見 Vim / `--no-edit` 卡關說明）、可展開的「操作提示（未檢視提示不輸出於原始 HTML，點擊展開後由 API 動態載入並記錄次數；考試模式展開前先彈窗確認）」、「檢查結果」及「重設本題」。
+- 檢查結果區分 `passed`、`failed` 與 `waiting`（主要動作尚未有進度前，前置狀態型項目顯示「待確認」而非綠勾）；考試模式下完成條件標題與失敗訊息均不外洩具體 Git 指令名稱。
 
-### 4.3 重設與審計紀錄
+### 4.3 重設、修復與審計紀錄
 
-- `reset_task` 原子重建題目 repository 並重新擷取 `baseline`，同時**保留累計 `check_attempts`、`hints_used` 並遞增 `reset_count`**。
+- `reset_task` 原子重建題目 repository 並重新擷取 `baseline`，同時**保留 `first_opened_at`、累計 `check_attempts`、`hints_used` 並遞增 `reset_count`**。
+- 考官手動修復（`repair_task`）與啟動自動修復分別記錄於 `repair_count`（不計入受測者 `reset_count`），隔離備份以 `repair-<task_id>-<session_id>` 或 `corrupt-<task_id>-<session_id>` 命名，並於 `delete_session` 時一併清理該 session 對應備份。
 - `completed_at` 僅於首次通過時寫入，重複檢查不會覆寫首次完成時間。
 
 ### 4.4 結果摘要與考官模式（`/examiner`）
 
-- 結果頁顯示姓名、測驗模式、開始／完成時間、總作答時間、每題檢查／重設／提示次數與耗時、SHA-256 完整性驗證碼、可展開操作時間軸，並支援「複製文字摘要」與「保存成 PNG」。
-- 若設定 `GIT_ASSESSMENT_EXAMINER_PIN`，首頁只允許同瀏覽器 cookie 繼續自己的未完成測驗；歷史清單、刪除、修復、原始 JSON 與殘留檔清理僅可在 `/examiner` 解鎖後操作。
+- 結果頁顯示姓名、測驗模式、開始／完成時間、總作答時間、每題檢查／重設／修復／提示次數與耗時（缺少開始時間時顯示 `—`）、SHA-256 檔案一致性校驗碼、可展開操作時間軸，並支援「複製文字摘要」與「保存成 PNG」。
+- 若設定考官 PIN，首頁隱藏他人清單與頁首「考官模式」連結；所有 session 頁面與操作 API 僅允許同瀏覽器 cookie 或已解鎖考官存取；PIN 錯誤採 PRG 導回 `/examiner` 並於連續 5 次錯誤後鎖定 60 秒（HTTP `429`）；`/api/health` 不回傳 session 清單。
 
 ## 5. Workspace 與結果資料
 
-- Schema version 維持為 `3`（向下相容遷移），新增選用欄位：`mode`、`integrity_hash`，以及每題 `first_opened_at`、`reset_count`、`hints_used`、`viewed_hints`、`baseline`。
-- 每次 `_save_result` 會自動計算並寫入 `integrity_hash`（SHA-256），於結果頁與考官模式即時驗算資料完整性。
+- Schema version 維持為 `3`（向下相容遷移），新增選用欄位：`mode`、`integrity_hash`，以及每題 `first_opened_at`、`reset_count`、`repair_count`、`hints_used`、`viewed_hints`、`baseline`（含 `reflog_count`）。
+- 每次 `_save_result` 會自動計算並寫入 `integrity_hash`（SHA-256），於結果頁與考官模式檢查結果檔案是否一致。
 
 ## 6. 六道實作題目與檢查類型
 
 - **Task 01**：選擇性提交（只提交 `src/config.py`，驗證 `HEAD != baseline.assessment_start`、`README.md` 保持未暫存修改且未進入 commit、`debug.log` 保持 untracked 且未進入 commit）。
-- **Task 02**：Amend 最新 commit（額外驗證 `reflog_contains_action: commit (amend)`）。
+- **Task 02**：Amend 最新 commit（驗證 baseline 之後的新增 reflog 出現行首前綴 `commit (amend):`）。
 - **Task 03**：建立功能分支（使用 `ref_equals` 比對伺服器端 `baseline.main` SHA 防止 `branch -f` 竄改）。
-- **Task 04**：Fetch、Rebase 與 Conflict（驗證 `origin/main == baseline.remote_pending_main`、`no_conflict_markers`、設定正規表示式比對與無殘留舊值、`reflog_contains_action: rebase (finish)`）。
-- **Task 05**：Stash 與遠端分支（驗證 `branch_tracks_remote`、`Task05` 相容性版本比對 `>= TemplateBuilder.TASK05_MIN_VERSION`、放寬 reflog 來回切換檢查）。
-- **Task 06**：Cherry-pick 指定 Commit（Template v8 的 `fix/validation` 含 2 筆 commit，額外驗證未帶入不相關檔案 `notes/validator_todo.md`、`reflog_contains_action: cherry-pick` 與 `patch_equivalent`）。
+- **Task 04**：Fetch、Rebase 與 Conflict（驗證 `origin/main == baseline.remote_pending_main`、`{baseline:remote_pending_main}..HEAD == 1`、支援前導空白偵測之 `no_conflict_markers`、設定正規表示式比對與無殘留舊值、行首前綴 `rebase (finish):`）。
+- **Task 05**：Stash 與遠端分支（Template v9 使遠端 `hotfix/check-status` 亦異動 `notes/development.md` 強制必須先 stash 才能切換，並清空範本 reflog；驗證 `branch_tracks_remote` 與新增 reflog 出現 `reflog_checkout_to: hotfix/check-status`）。
+- **Task 06**：Cherry-pick 指定 Commit（`fix/validation` 含 2 筆 commit，額外驗證未帶入不相關檔案 `notes/validator_todo.md`、新增 reflog 行首前綴 `cherry-pick:` 與 `patch_equivalent`）。
 
-目前支援 27 種 check types（含 `branch_tracks_remote`、`no_conflict_markers`、`file_equals`、`file_matches`、`file_not_contains`、`file_not_exists`、`ref_equals`、`reflog_contains_action`、`patch_equivalent`）。
+目前支援 28 種 check types（含 `branch_tracks_remote`、`no_conflict_markers`、`file_equals`、`file_matches`、`file_not_contains`、`file_not_exists`、`ref_equals`、`reflog_contains_action`、`reflog_checkout_to`、`patch_equivalent`）。
 
 ## 7. API 與安全設計
 

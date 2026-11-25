@@ -19,7 +19,9 @@
     </a>
     <div class="header-actions">
       {% block header_action %}{% endblock %}
+      {% if not examiner_required or examiner_unlocked %}
       <a class="header-link header-examiner" href="{{ url_for('main.examiner_dashboard') }}">考官模式</a>
+      {% endif %}
       <button class="shutdown-button" type="button" id="shutdown-app" aria-label="安全關閉 Git Assessment" title="停止本機伺服器（所有測驗進度會自動保存，不會遺失）">
         <span class="shutdown-dot" aria-hidden="true"></span>
         <span class="shutdown-label-full">安全關閉 Git Assessment</span>
